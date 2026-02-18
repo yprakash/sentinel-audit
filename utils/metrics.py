@@ -68,6 +68,7 @@ import psutil
 from prometheus_client import start_http_server, Gauge
 
 logger = logging.getLogger(__name__)
+SystemMetricsTask = None
 
 CPU_PERCENT = Gauge(
     "cpu_usage_percentage",
@@ -128,11 +129,15 @@ class SystemMetrics:
 
 
 async def start_metrics_server(port, app_name, shutdown_event, interval):
-    start_http_server(port)
-    logger.info("Metrics server started on port %d", port)
+    global SystemMetricsTask
+    if SystemMetricsTask is None:
+        start_http_server(port)
+        logger.info("Metrics server started on port %d", port)
 
-    metrics = SystemMetrics(app_name, shutdown_event, interval)
-    return asyncio.create_task(metrics.collect_metrics())
+        metrics = SystemMetrics(app_name, shutdown_event, interval)
+        SystemMetricsTask = asyncio.create_task(metrics.collect_metrics())
+
+    return SystemMetricsTask
 
 
 async def main():
