@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import os
 from typing import Any, Dict
 
 import httpx
@@ -16,44 +19,39 @@ from openai import (
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 from utils.llm import BaseLLM
 
+logger = logging.getLogger(__name__)
+
+openai_params = {
+    "max_retries": os.environ["OPENAI_MAX_RETRIES"] if "OPENAI_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
+}
+if "OPENAI_BASE_URL" in os.environ:
+    openai_params["base_url"] = os.environ["OPENAI_BASE_URL"]
+if "OPENAI_TIMEOUT" in os.environ:
+    openai_params["timeout"] = httpx.Timeout(float(os.environ["OPENAI_TIMEOUT"]), connect=10.0)
+else:
+    openai_params["timeout"] = DEFAULT_TIMEOUT
+
+openai_client = AsyncOpenAI(**openai_params)
+active_tasks: set[asyncio.Task] = set()
+
+
+async def shutdown():
+    if active_tasks:  # wait for in-flight LLM calls
+        logger.info(f"Waiting {len(active_tasks)} openai active tasks")
+        await asyncio.gather(*active_tasks, return_exceptions=True)
+
+    if openai_client:
+        logger.info("Closing AsyncOpenAI client...")
+        await openai_client.close()
+
 
 class OpenAIClient(BaseLLM):
-    """
-    OpenAI implementation of BaseLLM. Only implements provider logic.
-
-    Responsibilities:
-    - Own OpenAI SDK client lifecycle
-    - Translate normalized BaseLLM.generate(...) arguments
-    - Extract token usage
-
-    All shared logic (metrics, timing, orchestration) is handled in BaseLLM.
-    """
-
     def __init__(
             self,
-            *,
-            api_key: str | None = None,
-            timeout: float | None = None,
-            max_retries: int = DEFAULT_MAX_RETRIES,
+            model,
+            agent_role,
     ) -> None:
-        """
-        Construct a new async OpenAI client instance.
-
-        If api_key is not provided, it will be inferred from
-        the OPENAI_API_KEY environment variable by the SDK.
-
-        Args:
-            api_key: Optional explicit API key.
-            timeout: Request timeout in seconds.
-            max_retries: Maximum automatic retries by SDK.
-        """
-        self._client = AsyncOpenAI(
-            api_key=api_key,
-            max_retries=max_retries,
-            timeout=httpx.Timeout(timeout, connect=10.0) if timeout and timeout > 0 else DEFAULT_TIMEOUT,
-        )
-
-        super().__init__(provider="openai")
+        super().__init__("openai", model, agent_role)
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
@@ -69,6 +67,8 @@ class OpenAIClient(BaseLLM):
         Returns:
             Raw OpenAI SDK response object.
         """
+        task = asyncio.current_task()
+        active_tasks.add(task)
         try:
             response = await self._client.chat.completions.create(
                 model=model,
@@ -95,6 +95,8 @@ class OpenAIClient(BaseLLM):
             raise RuntimeError("Unexpected OpenAI API error") from e
         except Exception as e:
             raise RuntimeError("Unknown error occurred while calling OpenAI") from e  # Final safety net
+        finally:
+            active_tasks.discard(task)
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
         """

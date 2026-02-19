@@ -1,6 +1,8 @@
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
+from asyncio import Semaphore
 from typing import Any, Optional
 
 from prometheus_client import Histogram, Counter
@@ -116,14 +118,19 @@ class BaseLLM(ABC):
     def __init__(
             self,
             provider: str,
-            model: str,
+            model: str = None,
             agent_role: str = None,
+            max_concurrent: int = 5,
     ) -> None:
         if not provider:
             raise ValueError("Provider name must be defined.")
         self.provider = provider.strip()
+        if model is None:
+            key = self.provider.upper() + "_MODEL_NAME"
+            model = os.environ.get(key, "")
         self.model = model
         self.agent_role = agent_role if agent_role else "unknown"
+        self.semaphore = Semaphore(max_concurrent)
 
     @abstractmethod
     def extract_usage(self, response):
@@ -140,7 +147,7 @@ class BaseLLM(ABC):
         """
         raise NotImplementedError
 
-    async def generate(self, model: str, **kwargs) -> Any:
+    async def generate(self, model: str = None, **kwargs) -> Any:
         """
         Public async entrypoint.
 
@@ -157,8 +164,9 @@ class BaseLLM(ABC):
             model = self.model
 
         try:
-            response = await self._generate_impl(model=model, **kwargs)
-            return response
+            async with self.semaphore:
+                response = await self._generate_impl(model=model, **kwargs)
+                return response
         except Exception:
             status = "error"
             raise

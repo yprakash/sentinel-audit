@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import os
 from typing import Any, Dict
 
 import httpx
@@ -18,35 +20,37 @@ from utils.llm import BaseLLM
 
 logger = logging.getLogger(__name__)
 
+groq_params = {
+    "max_retries": os.environ["GROQ_MAX_RETRIES"] if "GROQ_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
+}
+if "GROQ_BASE_URL" in os.environ:
+    groq_params["base_url"] = os.environ["GROQ_BASE_URL"]
+if "GROQ_TIMEOUT" in os.environ:
+    groq_params["timeout"] = httpx.Timeout(float(os.environ["GROQ_TIMEOUT"]), connect=10.0)
+else:
+    groq_params["timeout"] = DEFAULT_TIMEOUT
+
+groq_client = AsyncGroq(**groq_params)
+active_tasks: set[asyncio.Task] = set()
+
+
+async def shutdown():
+    if active_tasks:  # wait for in-flight LLM calls
+        logger.info(f"Waiting {len(active_tasks)} groq active tasks")
+        await asyncio.gather(*active_tasks, return_exceptions=True)
+
+    if groq_client:
+        logger.info("Closing AsyncGroq client...")
+        await groq_client.close()
+
 
 class GroqClient(BaseLLM):
-    """
-    Groq implementation of BaseLLM. Only implements provider logic.
-
-    Responsibilities:
-    - Own Groq SDK client lifecycle
-    - Translate normalized BaseLLM.generate(...) arguments
-    - Extract token usage
-    """
-
     def __init__(
             self,
-            *,
-            timeout: float | None = None,
-            max_retries: int = DEFAULT_MAX_RETRIES,
+            model,
+            agent_role,
     ) -> None:
-        """
-        Construct a new async Groq client instance.
-        Args:
-            timeout: Request timeout in seconds.
-            max_retries: Maximum automatic retries by SDK.
-        """
-        self._client = AsyncGroq(
-            max_retries=max_retries,
-            timeout=httpx.Timeout(timeout, connect=10.0) if timeout and timeout > 0 else DEFAULT_TIMEOUT,
-        )
-
-        super().__init__(provider="groq")
+        super().__init__("groq", model, agent_role)
 
     async def _generate_impl(self, model: str, **kwargs) -> Dict[str, Any]:
         """
@@ -62,6 +66,8 @@ class GroqClient(BaseLLM):
         Returns:
             Raw Groq SDK response object (converted to dict if needed).
         """
+        task = asyncio.current_task()
+        active_tasks.add(task)
         try:
             response = await self._client.chat.completions.create(
                 model=model,
@@ -85,6 +91,8 @@ class GroqClient(BaseLLM):
             raise RuntimeError(f"Groq API returned error status {e.status_code}") from e
         except Exception as e:
             raise RuntimeError("Unexpected Groq API error") from e  # Future-proof catch-all
+        finally:
+            active_tasks.discard(task)
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
         """

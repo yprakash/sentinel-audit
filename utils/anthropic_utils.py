@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import os
 from typing import Any, Dict
 
 import httpx
@@ -16,45 +19,39 @@ from anthropic import (
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 from utils.llm import BaseLLM
 
+logger = logging.getLogger(__name__)
+
+anthropic_params = {
+    "max_retries": os.environ["ANTHROPIC_MAX_RETRIES"] if "ANTHROPIC_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
+}
+if "ANTHROPIC_BASE_URL" in os.environ:
+    anthropic_params["base_url"] = os.environ["ANTHROPIC_BASE_URL"]
+if "ANTHROPIC_TIMEOUT" in os.environ:
+    anthropic_params["timeout"] = httpx.Timeout(float(os.environ["ANTHROPIC_TIMEOUT"]), connect=10.0)
+else:
+    anthropic_params["timeout"] = DEFAULT_TIMEOUT
+
+anthropic_client = AsyncAnthropic(**anthropic_params)
+active_tasks: set[asyncio.Task] = set()
+
+
+async def shutdown():
+    if active_tasks:  # wait for in-flight LLM calls
+        logger.info(f"Waiting {len(active_tasks)} anthropic active tasks")
+        await asyncio.gather(*active_tasks, return_exceptions=True)
+
+    if anthropic_client:
+        logger.info("Closing AsyncAnthropic client...")
+        await anthropic_client.close()
+
 
 class AnthropicClient(BaseLLM):
-    """
-    Anthropic implementation of BaseLLM.
-
-    Responsibilities:
-    - Own Anthropic SDK client lifecycle
-    - Translate normalized BaseLLM.generate(...) arguments
-    - Extract token usage
-    - Map Anthropic-specific exceptions to normalized runtime errors
-
-    Shared logic (metrics, timing, orchestration) lives in BaseLLM.
-    """
-
     def __init__(
             self,
-            *,
-            api_key: str | None = None,
-            timeout: float | None = None,
-            max_retries: int = DEFAULT_MAX_RETRIES,
+            model,
+            agent_role,
     ) -> None:
-        """
-        Construct a new async Anthropic client instance.
-
-        If api_key is not provided, it will be inferred from
-        the ANTHROPIC_API_KEY environment variable by the SDK.
-
-        Args:
-            api_key: Optional explicit API key.
-            timeout: Request timeout in seconds.
-            max_retries: Maximum automatic retries by SDK.
-        """
-        self._client = AsyncAnthropic(
-            api_key=api_key,
-            max_retries=max_retries,
-            timeout=httpx.Timeout(timeout, connect=10.0) if timeout and timeout > 0 else DEFAULT_TIMEOUT,
-        )
-
-        super().__init__(provider="anthropic")
+        super().__init__("anthropic", model, agent_role)
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
@@ -74,6 +71,8 @@ class AnthropicClient(BaseLLM):
         - Requires max_tokens
         - System prompt is separate (system=...)
         """
+        task = asyncio.current_task()
+        active_tasks.add(task)
         try:
             response = await self._client.messages.create(
                 model=model,
@@ -98,6 +97,8 @@ class AnthropicClient(BaseLLM):
             raise RuntimeError("Unexpected Anthropic API error") from e
         except Exception as e:
             raise RuntimeError("Unknown error occurred while calling Anthropic") from e
+        finally:
+            active_tasks.discard(task)
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
         """
