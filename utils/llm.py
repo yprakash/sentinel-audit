@@ -17,44 +17,44 @@ _missing_usage_logged = set()
 LLM_REQUESTS_TOTAL = Counter(
     "llm_requests_total",
     "Total LLM requests",
-    ["provider", "model", "status"],
+    ["provider", "model", "agent_role", "status"],
 )
 
 LLM_LATENCY = Histogram(
     "llm_request_duration_seconds",
     "LLM request latency in seconds",
-    ["provider", "model"],
+    ["provider", "model", "agent_role"],
     buckets=(0.1, 0.3, 0.5, 1, 2, 5, 10, 20, 30, 60),
 )
 
 LLM_INPUT_TOKENS = Counter(
     "llm_tokens_prompt_total",
     "Total input tokens",
-    ["provider", "model"],
+    ["provider", "model", "agent_role"],
 )
 
 LLM_OUTPUT_TOKENS = Counter(
     "llm_tokens_completion_total",
     "Total output tokens",
-    ["provider", "model"],
+    ["provider", "model", "agent_role"],
 )
 
 # Metrics for future use
 LLM_TOKENS_TOTAL = Counter(
     "llm_tokens_total",
     "Total LLM tokens",
-    ["provider", "model"],
+    ["provider", "model", "agent_role"],
 )
 LLM_TTFT_SECONDS = Histogram(  # Crucial for "perceived speed" in UI
     "llm_ttft_seconds",
     "Time to First Token",
-    ["provider", "model"],
+    ["provider", "model", "agent_role"],
     buckets=(0.1, 0.3, 0.5, 1, 2, 5, 10, 20, 30, 60),
 )
 LLM_ITL_SECONDS = Histogram(  # Measures "smoothness" of streaming
     "llm_itl_seconds",
     "Inter-Token Latency",
-    ["provider", "model"],
+    ["provider", "model", "agent_role"],
     buckets=(0.1, 0.3, 0.5, 1, 2, 5, 10, 20, 30, 60),
 )
 
@@ -115,11 +115,15 @@ class BaseLLM(ABC):
 
     def __init__(
             self,
-            provider: str
+            provider: str,
+            model: str,
+            agent_role: str = None,
     ) -> None:
         if not provider:
             raise ValueError("Provider name must be defined.")
         self.provider = provider.strip()
+        self.model = model
+        self.agent_role = agent_role if agent_role else "unknown"
 
     @abstractmethod
     def extract_usage(self, response):
@@ -149,6 +153,8 @@ class BaseLLM(ABC):
         start = time.perf_counter()
         status = "success"
         response = None
+        if model is None or not model:
+            model = self.model
 
         try:
             response = await self._generate_impl(model=model, **kwargs)
@@ -161,6 +167,7 @@ class BaseLLM(ABC):
             duration = time.perf_counter() - start
             self._record_metrics(
                 model=model,
+                agent_role=self.agent_role,
                 duration=duration,
                 status=status,
                 response=response,
@@ -169,6 +176,7 @@ class BaseLLM(ABC):
     def _record_metrics(
             self,
             model: str,
+            agent_role: str,
             duration: float,
             status: str,
             response: Any,
@@ -184,6 +192,7 @@ class BaseLLM(ABC):
         LLM_REQUESTS_TOTAL.labels(
             provider=self.provider,
             model=model,
+            agent_role=agent_role,
             status=status,
         ).inc()
 
@@ -191,6 +200,7 @@ class BaseLLM(ABC):
         LLM_LATENCY.labels(
             provider=self.provider,
             model=model,
+            agent_role=agent_role,
         ).observe(duration)
 
         # Token usage extraction
@@ -200,11 +210,13 @@ class BaseLLM(ABC):
             LLM_INPUT_TOKENS.labels(
                 provider=self.provider,
                 model=model,
+                agent_role=agent_role,
             ).inc(usage["input"])
 
             LLM_OUTPUT_TOKENS.labels(
                 provider=self.provider,
                 model=model,
+                agent_role=agent_role,
             ).inc(usage["output"])
 
         elif response:
