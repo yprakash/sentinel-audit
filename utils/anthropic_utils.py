@@ -52,6 +52,7 @@ class AnthropicClient(BaseLLM):
             agent_role,
     ) -> None:
         super().__init__("anthropic", model, agent_role)
+        self._client = anthropic_client  # ensure shared client usage
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """

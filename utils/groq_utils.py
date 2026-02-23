@@ -51,6 +51,7 @@ class GroqClient(BaseLLM):
             agent_role,
     ) -> None:
         super().__init__("groq", model, agent_role)
+        self._client = groq_client  # ensure shared client usage
 
     async def _generate_impl(self, model: str, **kwargs) -> Dict[str, Any]:
         """
