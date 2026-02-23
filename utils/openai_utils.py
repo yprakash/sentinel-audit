@@ -21,22 +21,35 @@ from utils.llm import BaseLLM
 
 logger = logging.getLogger(__name__)
 
+# -----------------------------
+# OpenAI client configuration
+# -----------------------------
 openai_params = {
     "max_retries": os.environ["OPENAI_MAX_RETRIES"] if "OPENAI_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
 }
 if "OPENAI_BASE_URL" in os.environ:
     openai_params["base_url"] = os.environ["OPENAI_BASE_URL"]
 if "OPENAI_TIMEOUT" in os.environ:
-    openai_params["timeout"] = httpx.Timeout(float(os.environ["OPENAI_TIMEOUT"]), connect=10.0)
+    openai_params["timeout"] = httpx.Timeout(
+        float(os.environ["OPENAI_TIMEOUT"]),
+        connect=10.0
+    )
 else:
     openai_params["timeout"] = DEFAULT_TIMEOUT
 
 openai_client = AsyncOpenAI(**openai_params)
+
+# Track in-flight LLM calls for graceful shutdown
 active_tasks: set[asyncio.Task] = set()
 
 
 async def shutdown():
-    if active_tasks:  # wait for in-flight LLM calls
+    """
+    Gracefully shutdown:
+    1. Wait for all in-flight LLM calls
+    2. Close AsyncOpenAI client
+    """
+    if active_tasks:
         logger.info(f"Waiting {len(active_tasks)} openai active tasks")
         await asyncio.gather(*active_tasks, return_exceptions=True)
 
@@ -46,19 +59,16 @@ async def shutdown():
 
 
 class OpenAIClient(BaseLLM):
-    def __init__(
-            self,
-            model,
-            agent_role,
-    ) -> None:
+    def __init__(self, model, agent_role) -> None:
         super().__init__("openai", model, agent_role)
+        self._client = openai_client  # ensure shared client usage
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
-        Provider-specific implementation for chat/text generation.
+        Generate response using OpenAI Responses API.
 
         Expected normalized kwargs from BaseLLM.generate():
-            - messages: list[dict]
+            - input: list[dict]
             - temperature: float (optional)
             - max_tokens: int (optional)
             - top_p: float (optional)
@@ -69,8 +79,12 @@ class OpenAIClient(BaseLLM):
         """
         task = asyncio.current_task()
         active_tasks.add(task)
+
         try:
-            response = await self._client.chat.completions.create(
+            # If upstream still sends `messages`, map to `input`
+            # if "messages" in kwargs: kwargs["input"] = kwargs.pop("messages")
+
+            response = await self._client.responses.create(
                 model=model,
                 **kwargs,
             )
@@ -100,7 +114,8 @@ class OpenAIClient(BaseLLM):
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
         """
-        Extract token usage from OpenAI response.
+        Extract token usage from Responses API.
+
         Called by BaseLLM after _generate_impl to update metrics.
         Returns:
             {
@@ -118,8 +133,11 @@ class OpenAIClient(BaseLLM):
                 "total_tokens": 0,
             }
 
+        input_tokens = getattr(usage, "input_tokens", 0)
+        output_tokens = getattr(usage, "output_tokens", 0)
+
         return {
-            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-            "completion_tokens": getattr(usage, "completion_tokens", 0),
-            "total_tokens": getattr(usage, "total_tokens", 0),
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
         }
