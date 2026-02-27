@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import traceback
 from abc import ABC, abstractmethod
 from asyncio import Semaphore
 from typing import Any, Optional
@@ -158,7 +159,7 @@ class BaseLLM(ABC):
         """
 
         start = time.perf_counter()
-        status = "success"
+        status = "SUCCESS"
         response = None
         if model is None or not model:
             model = self.model
@@ -167,9 +168,11 @@ class BaseLLM(ABC):
             async with self.semaphore:
                 response = await self._generate_impl(model=model, **kwargs)
                 return response
-        except Exception:
-            status = "error"
-            raise
+        except Exception as e:
+            status = "ERROR"
+            error_msg = traceback.format_exc()
+            logger.exception(error_msg)
+            raise e
 
         finally:
             duration = time.perf_counter() - start
@@ -213,6 +216,7 @@ class BaseLLM(ABC):
 
         # Token usage extraction
         usage = self.extract_usage(response)
+        log_line = f"LLM output status={status} for provider={self.provider}, model={model}, agent_role={agent_role}, duration={duration:.3f}s"
 
         if usage:
             LLM_INPUT_TOKENS.labels(
@@ -226,6 +230,7 @@ class BaseLLM(ABC):
                 model=model,
                 agent_role=agent_role,
             ).inc(usage["output"])
+            log_line += f", input_tokens={usage['input']}, output_tokens={usage['output']}"
 
         elif response:
             # Log only once per provider/model to avoid log flooding
@@ -238,3 +243,8 @@ class BaseLLM(ABC):
                     model,
                 )
                 _missing_usage_logged.add(key)
+
+        if status == "SUCCESS":
+            logger.info(log_line)
+        else:
+            logger.error(log_line)
