@@ -43,3 +43,4 @@ class AuditState(BaseModel):
 
     token_usage_total: int = 0
     next_step: str = "run"
+    audit_thread_id: Optional[str] = None  # Deterministic identifier
