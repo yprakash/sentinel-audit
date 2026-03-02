@@ -1,7 +1,11 @@
+import logging
+
 from agents.prompts import REPORTER_AGENT_PROMPT
 from state import AuditState
 from utils.llm import BaseLLM
 from utils.prompt_renderer import render_prompt
+
+logger = logging.getLogger(__name__)
 
 
 async def reporter_agent(state: AuditState, llm: BaseLLM):
@@ -10,6 +14,7 @@ async def reporter_agent(state: AuditState, llm: BaseLLM):
         validated_findings=state.validated_findings,
     )
 
+    logger.info("Reporter agent LLM call initiated")
     response = await llm.generate(prompt)
 
     return {
