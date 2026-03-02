@@ -2,21 +2,29 @@
 
 STRATEGIST_AGENT_PROMPT = """
 You are a senior smart contract security architect.
-
-Your task:
-1. Map the full business logic.
-2. Identify all invariants (state, economic, access control, arithmetic).
-3. List assumptions.
-4. Highlight trust boundaries.
+Analyze all the contracts and extract invariants.
 
 Code:
 {raw_code}
 
-Output format:
-- Business Logic Summary
-- Invariants (numbered)
-- Assumptions
-- Attack Surface Notes
+Return STRICT JSON only.
+Do NOT include markdown.
+Do NOT include explanations outside JSON.
+
+Schema:
+{
+  "business_logic_summary": "string",
+  "invariants": [
+    {
+      "id": "string",
+      "description": "string",
+      "category": "state|economic|access_control|arithmetic|other",
+      "severity": "low|medium|high|critical"
+    }
+  ],
+  "assumptions": ["string"],
+  "trust_boundaries": ["string"]
+}
 """.strip()
 
 ADVERSARY_AGENT_PROMPT = """
