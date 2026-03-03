@@ -2,7 +2,7 @@ import logging
 from typing import Dict
 
 from utils.llm import BaseLLM
-from .llm_registry import LLMRegistry
+from llm_registry import LLMRegistry
 
 """
 Factory + Singleton Cache Pattern.

@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from agents.audit_state import AuditState
+from state import AuditState
 from utils.cryptography_utils import sha256_hex
 
 logger = logging.getLogger(__name__)

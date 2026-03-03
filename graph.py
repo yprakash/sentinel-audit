@@ -83,18 +83,17 @@ def _create_graph():  # -> CompiledGraph:
     builder.add_edge(reporter_node_name, END)
 
     # Redis Stack must have been started by now in terminal `redis-stack-server`
-    with RedisSaver.from_conn_string(REDIS_URL) as _checkpointer:
-        _checkpointer.setup()  # performs one-time initialization in Redis:
-        # Creates RediSearch index (via FT.CREATE), Ensures schema exists, Prepares storage structures
-        # Without calling setup(), Redis won’t have required indices and queries will fail.
-        redis_checkpointer = _checkpointer
+    redis_checkpointer = RedisSaver.from_conn_string(REDIS_URL)
+    redis_checkpointer.setup()  # performs one-time initialization in Redis
+    # Creates RediSearch index (via FT.CREATE), Ensures schema exists, Prepares storage structures
+    # Without calling setup(), Redis won’t have required indices and queries will fail.
 
     graph = builder.compile(
         checkpointer=redis_checkpointer,
-        interrupt_before=[strategist_node_name, adversary_node_name, validator_node_name, reporter_node_name],
+        # interrupt_before=[strategist_node_name, adversary_node_name, validator_node_name, reporter_node_name],
     )
     logger.info(
-        "Sentinel graph compiled",
+        "Sentinel graph compiled successfully.",
         extra={
             "node_count": len(builder.nodes),
             "edge_count": len(builder.edges),

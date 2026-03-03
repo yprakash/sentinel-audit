@@ -1,5 +1,5 @@
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     - Environment variables
     - .env file
     """
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore",  # mandatory
+    )
 
     # ---- Strategist Agent LLM ----
     STRATEGIST_PROVIDER: str = Field(default="groq")
@@ -33,10 +38,6 @@ class Settings(BaseSettings):
     REPORTER_MODEL: str = Field(default="llama-3.1-8b-instant")
     REPORTER_TEMPERATURE: float = Field(default=0.0)
     REPORTER_MAX_TOKENS: int = Field(default=2048)
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 settings = Settings()

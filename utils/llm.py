@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from prometheus_client import Histogram, Counter
 
-from metrics import start_metrics_server
+from utils.metrics import start_metrics_server
 
 logger = logging.getLogger(__name__)
 
