@@ -15,6 +15,7 @@ from groq import (
     NotFoundError,
 )
 
+from llm_registry import LLMRegistry
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 from utils.llm import BaseLLM
 
@@ -121,3 +122,6 @@ class GroqClient(BaseLLM):
             "completion_tokens": getattr(usage, "completion_tokens", 0),
             "total_tokens": getattr(usage, "total_tokens", 0),
         }
+
+
+LLMRegistry.register("groq", GroqClient)

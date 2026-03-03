@@ -16,6 +16,7 @@ from anthropic import (
     AnthropicError,
 )
 
+from llm_registry import LLMRegistry
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 from utils.llm import BaseLLM
 
@@ -126,3 +127,6 @@ class AnthropicClient(BaseLLM):
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
         }
+
+
+LLMRegistry.register("anthropic", AnthropicClient)

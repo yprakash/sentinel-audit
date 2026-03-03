@@ -16,6 +16,7 @@ from openai import (
     OpenAIError,
 )
 
+from llm_registry import LLMRegistry
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 from utils.llm import BaseLLM
 
@@ -141,3 +142,6 @@ class OpenAIClient(BaseLLM):
             "completion_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
         }
+
+
+LLMRegistry.register("openai", OpenAIClient)
