@@ -38,7 +38,16 @@ if "OPENAI_TIMEOUT" in os.environ:
 else:
     openai_params["timeout"] = DEFAULT_TIMEOUT
 
-openai_client = AsyncOpenAI(**openai_params)
+_openai_client = None
+
+
+def get_openai_client():
+    global _openai_client
+    if not _openai_client:
+        _openai_client = AsyncOpenAI(**openai_params)
+        logger.info(f"Openai client created")
+    return _openai_client
+
 
 # Track in-flight LLM calls for graceful shutdown
 active_tasks: set[asyncio.Task] = set()
@@ -54,15 +63,15 @@ async def shutdown():
         logger.info(f"Waiting {len(active_tasks)} openai active tasks")
         await asyncio.gather(*active_tasks, return_exceptions=True)
 
-    if openai_client:
+    if _openai_client:
         logger.info("Closing AsyncOpenAI client...")
-        await openai_client.close()
+        await _openai_client.close()
 
 
 class OpenAIClient(BaseLLM):
     def __init__(self, model, agent_role) -> None:
         super().__init__("openai", model, agent_role)
-        self._client = openai_client  # ensure shared client usage
+        self._client = get_openai_client()  # ensure shared client usage
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """

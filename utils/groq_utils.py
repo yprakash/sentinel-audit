@@ -31,8 +31,15 @@ if "GROQ_TIMEOUT" in os.environ:
 else:
     groq_params["timeout"] = DEFAULT_TIMEOUT
 
-groq_client = AsyncGroq(**groq_params)
+_groq_client = None
 active_tasks: set[asyncio.Task] = set()
+
+
+def get_groq_client():
+    global _groq_client
+    if not _groq_client:
+        _groq_client = AsyncGroq(**groq_params)
+    return _groq_client
 
 
 async def shutdown():
@@ -40,9 +47,9 @@ async def shutdown():
         logger.info(f"Waiting {len(active_tasks)} groq active tasks")
         await asyncio.gather(*active_tasks, return_exceptions=True)
 
-    if groq_client:
+    if _groq_client:
         logger.info("Closing AsyncGroq client...")
-        await groq_client.close()
+        await _groq_client.close()
 
 
 class GroqClient(BaseLLM):
@@ -52,7 +59,7 @@ class GroqClient(BaseLLM):
             agent_role,
     ) -> None:
         super().__init__("groq", model, agent_role)
-        self._client = groq_client  # ensure shared client usage
+        self._client = get_groq_client()  # ensure shared client usage
 
     async def _generate_impl(self, model: str, **kwargs) -> Dict[str, Any]:
         """
