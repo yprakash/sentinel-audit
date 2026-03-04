@@ -1,8 +1,9 @@
+import importlib
 import logging
 from typing import Dict
 
-from utils.llm import BaseLLM
 from llm_registry import LLMRegistry
+from utils.llm import BaseLLM
 
 """
 Factory + Singleton Cache Pattern.
@@ -22,17 +23,29 @@ logger = logging.getLogger(__name__)
 _LLM_CACHE: Dict[str, BaseLLM] = {}
 
 
+# _PROVIDERS = {"anthropic": AnthropicClient, "groq": GroqClient, "openai": OpenAIClient}
+
+
 def create_llm(provider: str, **kwargs) -> BaseLLM:
     """
     Returns a cached LLM instance if already created. Otherwise creates, caches, and returns it.
     This gives singleton-like behavior per provider.
     """
     # key = (provider, model)
-    key = provider
+    module_map = {
+        "groq": "utils.groq_utils",
+        "openai": "utils.openai_utils",
+        "anthropic": "utils.anthropic_utils",
+    }
+    if provider not in module_map:
+        raise ValueError(f"Unknown provider: {provider}")
+    module = importlib.import_module(module_map[provider])
+    logger.info(f"{module} imported. Creating LLM instance for {provider}")
 
-    if key not in _LLM_CACHE:
-        provider_cls = LLMRegistry.get(key)
-        _LLM_CACHE[key] = provider_cls(**kwargs)
+    if provider not in _LLM_CACHE:
+        # provider_cls = _PROVIDERS[provider]
+        provider_cls = LLMRegistry.get(provider)
+        _LLM_CACHE[provider] = provider_cls(**kwargs)
         logger.info(f"Created LLM instance for {provider}")
 
-    return _LLM_CACHE[key]
+    return _LLM_CACHE[provider]
