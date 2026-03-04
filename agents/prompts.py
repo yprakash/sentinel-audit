@@ -5,7 +5,7 @@ You are a senior smart contract security architect.
 Analyze all the contracts and extract invariants.
 
 Code:
-{raw_code}
+$raw_code
 
 Return STRICT JSON only.
 Do NOT include markdown.
@@ -31,10 +31,10 @@ ADVERSARY_AGENT_PROMPT = """
 You are an offensive smart contract security researcher.
 
 Given these invariants:
-{invariants}
+$invariants
 
 Target code:
-{raw_code}
+$raw_code
 
 Your task:
 1. Design Foundry forge test cases that attempt to break invariants.
@@ -62,10 +62,10 @@ Your task:
 4. Determine whether invariant violations are real or false positives.
 
 Code:
-{raw_code}
+$raw_code
 
 Tests:
-{test_cases}
+$test_cases
 
 Return:
 - Execution Summary
@@ -78,7 +78,7 @@ REPORTER_AGENT_PROMPT = """
 You are a senior audit report writer.
 
 Given validated findings:
-{validated_findings}
+$validated_findings
 
 Write a professional executive-grade audit report.
 
