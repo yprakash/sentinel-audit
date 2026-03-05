@@ -22,28 +22,26 @@ from utils.llm import BaseLLM
 
 logger = logging.getLogger(__name__)
 
-# -----------------------------
-# OpenAI client configuration
-# -----------------------------
-openai_params = {
-    "max_retries": os.environ["OPENAI_MAX_RETRIES"] if "OPENAI_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
-}
-if "OPENAI_BASE_URL" in os.environ:
-    openai_params["base_url"] = os.environ["OPENAI_BASE_URL"]
-if "OPENAI_TIMEOUT" in os.environ:
-    openai_params["timeout"] = httpx.Timeout(
-        float(os.environ["OPENAI_TIMEOUT"]),
-        connect=10.0
-    )
-else:
-    openai_params["timeout"] = DEFAULT_TIMEOUT
-
 _openai_client = None
 
 
 def get_openai_client():
     global _openai_client
     if not _openai_client:
+        openai_params = {
+            "max_retries": os.environ["OPENAI_MAX_RETRIES"] if \
+                "OPENAI_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
+        }
+        if "OPENAI_BASE_URL" in os.environ:
+            openai_params["base_url"] = os.environ["OPENAI_BASE_URL"]
+        if "OPENAI_TIMEOUT" in os.environ:
+            openai_params["timeout"] = httpx.Timeout(
+                float(os.environ["OPENAI_TIMEOUT"]),
+                connect=10.0
+            )
+        else:
+            openai_params["timeout"] = DEFAULT_TIMEOUT
+
         _openai_client = AsyncOpenAI(**openai_params)
         logger.info(f"Openai client created")
     return _openai_client
@@ -98,7 +96,9 @@ class OpenAIClient(BaseLLM):
                 model=model,
                 **kwargs,
             )
-            return response
+            if response:
+                self.write_llm_output(response)
+            return response.choices[0].message
 
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible") from e

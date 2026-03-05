@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -60,6 +61,7 @@ LLM_ITL_SECONDS = Histogram(  # Measures "smoothness" of streaming
     ["provider", "model", "agent_role"],
     buckets=(0.1, 0.3, 0.5, 1, 2, 5, 10, 20, 30, 60),
 )
+
 
 # Economic Metrics (Gauges)
 # llm_request_cost_usd: Calculate (tokens * price_per_token) on the fly.
@@ -148,6 +150,21 @@ class BaseLLM(ABC):
         """
         raise NotImplementedError
 
+    def write_llm_output(self, output):
+        file_path = f"mocked_outputs/{self.agent_role}.txt"
+        with open(file_path, 'a') as file:
+            file.write(output + os.linesep)
+        log_line = f"Written LLM output to {file_path}"
+
+        output_dict = json.loads(output)
+        if isinstance(output_dict, dict):
+            file_path = f"mocked_outputs/{self.agent_role}.json"
+            with open(file_path, 'w') as file:
+                json.dump(output_dict, file, indent=4)
+            log_line += f" as well as {file_path}"
+
+        logger.info(log_line)
+
     async def generate(self, model: str = None, **kwargs) -> Any:
         """
         Public async entrypoint.
@@ -219,18 +236,20 @@ class BaseLLM(ABC):
         log_line = f"LLM output status={status} for provider={self.provider}, model={model}, agent_role={agent_role}, duration={duration:.3f}s"
 
         if usage:
+            input_key = "prompt_tokens" if "prompt_tokens" in usage else "input_tokens"
+            output_key = "completion_tokens" if "completion_tokens" in usage else "output_tokens"
             LLM_INPUT_TOKENS.labels(
                 provider=self.provider,
                 model=model,
                 agent_role=agent_role,
-            ).inc(usage["input"])
+            ).inc(usage[input_key])
 
             LLM_OUTPUT_TOKENS.labels(
                 provider=self.provider,
                 model=model,
                 agent_role=agent_role,
-            ).inc(usage["output"])
-            log_line += f", input_tokens={usage['input']}, output_tokens={usage['output']}"
+            ).inc(usage[output_key])
+            log_line += f", input_tokens={usage[input_key]}, output_tokens={usage[output_key]}"
 
         elif response:
             # Log only once per provider/model to avoid log flooding

@@ -21,19 +21,26 @@ from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 from utils.llm import BaseLLM
 
 logger = logging.getLogger(__name__)
-
-anthropic_params = {
-    "max_retries": os.environ["ANTHROPIC_MAX_RETRIES"] if "ANTHROPIC_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
-}
-if "ANTHROPIC_BASE_URL" in os.environ:
-    anthropic_params["base_url"] = os.environ["ANTHROPIC_BASE_URL"]
-if "ANTHROPIC_TIMEOUT" in os.environ:
-    anthropic_params["timeout"] = httpx.Timeout(float(os.environ["ANTHROPIC_TIMEOUT"]), connect=10.0)
-else:
-    anthropic_params["timeout"] = DEFAULT_TIMEOUT
-
-anthropic_client = AsyncAnthropic(**anthropic_params)
+_anthropic_client = None
 active_tasks: set[asyncio.Task] = set()
+
+
+def get_anthropic_client():
+    global _anthropic_client
+    if not _anthropic_client:
+        anthropic_params = {
+            "max_retries": os.environ["ANTHROPIC_MAX_RETRIES"] if \
+                "ANTHROPIC_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
+        }
+        if "ANTHROPIC_BASE_URL" in os.environ:
+            anthropic_params["base_url"] = os.environ["ANTHROPIC_BASE_URL"]
+        if "ANTHROPIC_TIMEOUT" in os.environ:
+            anthropic_params["timeout"] = httpx.Timeout(float(os.environ["ANTHROPIC_TIMEOUT"]), connect=10.0)
+        else:
+            anthropic_params["timeout"] = DEFAULT_TIMEOUT
+
+        _anthropic_client = AsyncAnthropic(**anthropic_params)
+    return _anthropic_client
 
 
 async def shutdown():
@@ -41,9 +48,9 @@ async def shutdown():
         logger.info(f"Waiting {len(active_tasks)} anthropic active tasks")
         await asyncio.gather(*active_tasks, return_exceptions=True)
 
-    if anthropic_client:
+    if _anthropic_client:
         logger.info("Closing AsyncAnthropic client...")
-        await anthropic_client.close()
+        await _anthropic_client.close()
 
 
 class AnthropicClient(BaseLLM):
@@ -53,7 +60,7 @@ class AnthropicClient(BaseLLM):
             agent_role,
     ) -> None:
         super().__init__("anthropic", model, agent_role)
-        self._client = anthropic_client  # ensure shared client usage
+        self._client = get_anthropic_client()  # ensure shared client usage
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
@@ -80,7 +87,9 @@ class AnthropicClient(BaseLLM):
                 model=model,
                 **kwargs,
             )
-            return response
+            if response:
+                self.write_llm_output(response)
+            return response.content[0].text
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible in Anthropic") from e
         except BadRequestError as e:

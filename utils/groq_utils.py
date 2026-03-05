@@ -21,16 +21,6 @@ from utils.llm import BaseLLM
 
 logger = logging.getLogger(__name__)
 
-groq_params = {
-    "max_retries": os.environ["GROQ_MAX_RETRIES"] if "GROQ_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
-}
-if "GROQ_BASE_URL" in os.environ:
-    groq_params["base_url"] = os.environ["GROQ_BASE_URL"]
-if "GROQ_TIMEOUT" in os.environ:
-    groq_params["timeout"] = httpx.Timeout(float(os.environ["GROQ_TIMEOUT"]), connect=10.0)
-else:
-    groq_params["timeout"] = DEFAULT_TIMEOUT
-
 _groq_client = None
 active_tasks: set[asyncio.Task] = set()
 
@@ -38,6 +28,15 @@ active_tasks: set[asyncio.Task] = set()
 def get_groq_client():
     global _groq_client
     if not _groq_client:
+        groq_params = {
+            "max_retries": os.environ["GROQ_MAX_RETRIES"] if "GROQ_MAX_RETRIES" in os.environ else DEFAULT_MAX_RETRIES
+        }
+        if "GROQ_BASE_URL" in os.environ:
+            groq_params["base_url"] = os.environ["GROQ_BASE_URL"]
+        if "GROQ_TIMEOUT" in os.environ:
+            groq_params["timeout"] = httpx.Timeout(float(os.environ["GROQ_TIMEOUT"]), connect=10.0)
+        else:
+            groq_params["timeout"] = DEFAULT_TIMEOUT
         _groq_client = AsyncGroq(**groq_params)
     return _groq_client
 
@@ -61,7 +60,7 @@ class GroqClient(BaseLLM):
         super().__init__("groq", model, agent_role)
         self._client = get_groq_client()  # ensure shared client usage
 
-    async def _generate_impl(self, model: str, **kwargs) -> Dict[str, Any]:
+    async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
         Provider-specific implementation for text/chat generation.
 
@@ -82,7 +81,9 @@ class GroqClient(BaseLLM):
                 model=model,
                 **kwargs,
             )
-            return response.model_dump()
+            if response:
+                self.write_llm_output(response)
+            return response.choices[0].message
 
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible in Groq") from e
@@ -115,6 +116,7 @@ class GroqClient(BaseLLM):
             }
         """
         usage = getattr(response, "usage", None)
+        print(f"type={type(response)}: {response}")
 
         if not usage:
             logger.warning(f"Groq API returned empty usage response: {response}")
