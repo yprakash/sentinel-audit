@@ -33,6 +33,7 @@ def create_llm(provider: str, **kwargs) -> BaseLLM:
     """
     # key = (provider, model)
     module_map = {
+        "mock": "utils.mock_llm",
         "groq": "utils.groq_utils",
         "openai": "utils.openai_utils",
         "anthropic": "utils.anthropic_utils",
@@ -40,7 +41,7 @@ def create_llm(provider: str, **kwargs) -> BaseLLM:
     if provider not in module_map:
         raise ValueError(f"Unknown provider: {provider}")
     module = importlib.import_module(module_map[provider])
-    logger.info(f"{module} imported. Creating LLM instance for {provider}")
+    logger.info(f"module {module.__name__} imported. Creating LLM instance for {provider}")
 
     if provider not in _LLM_CACHE:
         # provider_cls = _PROVIDERS[provider]
