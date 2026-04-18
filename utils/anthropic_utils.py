@@ -18,11 +18,15 @@ from anthropic import (
 
 from llm_registry import LLMRegistry
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
-from utils.llm import BaseLLM
+from utils.llm import shutdown_llm_client, BaseLLM
 
 logger = logging.getLogger(__name__)
 _anthropic_client = None
 active_tasks: set[asyncio.Task] = set()
+
+
+async def shutdown():
+    await shutdown_llm_client(_anthropic_client, active_tasks)
 
 
 def get_anthropic_client():
@@ -41,16 +45,6 @@ def get_anthropic_client():
 
         _anthropic_client = AsyncAnthropic(**anthropic_params)
     return _anthropic_client
-
-
-async def shutdown():
-    if active_tasks:  # wait for in-flight LLM calls
-        logger.info(f"Waiting {len(active_tasks)} anthropic active tasks")
-        await asyncio.gather(*active_tasks, return_exceptions=True)
-
-    if _anthropic_client:
-        logger.info("Closing AsyncAnthropic client...")
-        await _anthropic_client.close()
 
 
 class AnthropicClient(BaseLLM):

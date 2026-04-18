@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -67,6 +68,26 @@ LLM_ITL_SECONDS = Histogram(  # Measures "smoothness" of streaming
 # llm_request_cost_usd: Calculate (tokens * price_per_token) on the fly.
 # llm_budget_remaining_usd
 # Agent-Specific Context Labels: model_name, agent_role (strategist vs. adversary), contract_name, and status_code.
+
+
+async def shutdown_llm_client(client = None, active_tasks: set[asyncio.Task] = None):
+    """
+    Gracefully shutdown:
+    1. Wait for all in-flight LLM calls
+    2. Close client like AsyncOpenAI/AsyncGroq
+    """
+    start = time.perf_counter()
+    client_name = client.__class__.__name__ if client else "UNDEFINED_CLIENT"
+    if active_tasks:
+        logger.info(f"Waiting for completion of {len(active_tasks)} {client_name} active tasks")
+        await asyncio.gather(*active_tasks, return_exceptions=True)
+
+    if client:
+        logger.info(f"Closing {client_name} client...")
+        await client.close()
+
+    duration = time.perf_counter() - start
+    logger.info(f"Graceful shut down of {client_name} Completed in {duration} seconds")
 
 
 def extract_usage(response: Any) -> Optional[dict]:

@@ -18,11 +18,15 @@ from openai import (
 
 from llm_registry import LLMRegistry
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
-from utils.llm import BaseLLM
+from utils.llm import shutdown_llm_client, BaseLLM
 
 logger = logging.getLogger(__name__)
 
 _openai_client = None
+
+
+# Track in-flight LLM calls for graceful shutdown
+active_tasks: set[asyncio.Task] = set()
 
 
 def get_openai_client():
@@ -47,23 +51,8 @@ def get_openai_client():
     return _openai_client
 
 
-# Track in-flight LLM calls for graceful shutdown
-active_tasks: set[asyncio.Task] = set()
-
-
 async def shutdown():
-    """
-    Gracefully shutdown:
-    1. Wait for all in-flight LLM calls
-    2. Close AsyncOpenAI client
-    """
-    if active_tasks:
-        logger.info(f"Waiting {len(active_tasks)} openai active tasks")
-        await asyncio.gather(*active_tasks, return_exceptions=True)
-
-    if _openai_client:
-        logger.info("Closing AsyncOpenAI client...")
-        await _openai_client.close()
+    await shutdown_llm_client(_openai_client, active_tasks)
 
 
 class OpenAIClient(BaseLLM):

@@ -17,12 +17,16 @@ from groq import (
 
 from llm_registry import LLMRegistry
 from utils.constants import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
-from utils.llm import BaseLLM
+from utils.llm import shutdown_llm_client, BaseLLM
 
 logger = logging.getLogger(__name__)
 
 _groq_client = None
 active_tasks: set[asyncio.Task] = set()
+
+
+async def shutdown():
+    await shutdown_llm_client(_groq_client, active_tasks)
 
 
 def get_groq_client():
