@@ -4,12 +4,17 @@ import asyncio
 import logging
 import signal
 import time
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
 
-class ShutdownManager:
+class Shutdownable(Protocol):
+    async def shutdown(self) -> None:
+        ...
+
+
+class _ShutdownManager:
     def __init__(
             self,
             *,
@@ -18,12 +23,11 @@ class ShutdownManager:
     ):
         self.per_component_timeout = per_component_timeout
         self.global_timeout = global_timeout
-        self.shutdown_started = False
+        self._shutdown_started = False
         self._lock = asyncio.Lock()
-        # self._targets: List[ShutdownTarget] = []  # When ShutdownTarget is convenient
         self._callbacks: list[Callable[[], Awaitable[None]]] = []
 
-    def register(self, component: Callable[[], Awaitable[None]]) -> None:
+    def register(self, component: Shutdownable) -> None:
         if self._shutdown_started:
             raise RuntimeError("Cannot register new components during shutdown")
         self._callbacks.append(component.shutdown)
@@ -41,19 +45,22 @@ class ShutdownManager:
                 return
             self._shutdown_started = True
 
+        def _name(fn):
+            return getattr(fn, "__qualname__", repr(fn))
+
         async def _run_target(target: Callable[[], Awaitable[None]]) -> None:
             try:
                 await asyncio.wait_for(target(), timeout=self.per_component_timeout)
             except asyncio.TimeoutError:
-                logger.warning(f"Timeout: {target}")
+                logger.warning("Timeout: %s", _name(target))
             except asyncio.CancelledError:
-                # propagate cancellation
-                raise
-            except Exception as e:
-                logger.exception(f"Error in {target}", e)
+                raise  # propagate cancellation
+            except Exception:
+                logger.exception("Error in %s", _name(target))
 
-        logger.info(f"Starting shutdown of {len(self._callbacks)} components")
-        tasks = [asyncio.create_task(_run_target(t)) for t in self._callbacks]
+        callbacks = list(self._callbacks)  # Use snapshot to avoid race conditions
+        logger.info(f"Starting shutdown of {len(callbacks)} components")
+        tasks = [_run_target(t) for t in callbacks]
 
         try:
             if self.global_timeout:
@@ -70,25 +77,23 @@ class ShutdownManager:
                 if not t.done():
                     t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            time_taken = time.perf_counter() - start_time
 
-        logger.info(f"Shutdown completed in %.3f seconds", time_taken)
+        logger.info(f"Shutdown completed in %.3f seconds", time.perf_counter() - start_time)
 
 
 shutdown_event = asyncio.Event()
 
 
-def setup_signal_handlers() -> None:
+def setup_signal_handlers(loop: asyncio.AbstractEventLoop | None = None):
     def _handler():
         shutdown_event.set()
-        logger.info(f"Shutdown process initiated")
+        logger.info("Shutdown process initiated")
 
-    loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+    loop = loop or asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGINT, _handler)
     loop.add_signal_handler(signal.SIGTERM, _handler)
 
 
-setup_signal_handlers()
-shutdown_manager = ShutdownManager()
+shutdown_manager = _ShutdownManager()
 
 __all__ = ["setup_signal_handlers", "shutdown_event", "shutdown_manager"]
