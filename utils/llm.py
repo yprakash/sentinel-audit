@@ -6,7 +6,7 @@ import time
 import traceback
 from abc import ABC, abstractmethod
 from asyncio import Semaphore
-from typing import Any, Optional
+from typing import Any, Dict
 
 from prometheus_client import Histogram, Counter
 
@@ -71,7 +71,7 @@ LLM_ITL_SECONDS = Histogram(  # Measures "smoothness" of streaming
 # Agent-Specific Context Labels: model_name, agent_role (strategist vs. adversary), contract_name, and status_code.
 
 
-async def shutdown_llm_client(client = None, active_tasks: set[asyncio.Task] = None):
+async def shutdown_llm_client(client=None, active_tasks: set[asyncio.Task] = None):
     """
     Gracefully shutdown:
     1. Wait for all in-flight LLM calls
@@ -89,38 +89,6 @@ async def shutdown_llm_client(client = None, active_tasks: set[asyncio.Task] = N
 
     duration = time.perf_counter() - start
     logger.info(f"Graceful shut down of {client_name} Completed in {duration} seconds")
-
-
-def extract_usage(response: Any) -> Optional[dict]:
-    """
-    Normalize token usage extraction across providers.
-    Note: This is just for reference. Should be deleted in the future.
-
-    Supports:
-    - response.usage
-    - response["usage"]
-    - Other future shapes can be added here centrally.
-    """
-    if response is None:
-        return None
-
-    # Object-style usage
-    if hasattr(response, "usage"):
-        usage = response.usage
-        return {
-            "input": getattr(usage, "prompt_tokens", 0),
-            "output": getattr(usage, "completion_tokens", 0),
-        }
-
-    # Dict-style usage
-    if isinstance(response, dict) and "usage" in response:
-        usage = response["usage"]
-        return {
-            "input": usage.get("prompt_tokens", 0),
-            "output": usage.get("completion_tokens", 0),
-        }
-
-    return None
 
 
 def init(port: int, app_name: str, shutdown_event, interval: int):
@@ -162,10 +130,6 @@ class BaseLLM(ABC):
 
     @abstractmethod
     async def shutdown(self) -> None:
-        pass
-
-    @abstractmethod
-    def extract_usage(self, response):
         pass
 
     @abstractmethod
@@ -234,6 +198,30 @@ class BaseLLM(ABC):
                 response=response,
             )
 
+    def extract_usage(self, response: Any) -> Dict[str, int]:
+        usage = response.get("usage", None)
+        if not usage:
+            logger.warning("%s LLM returned empty usage response: %s", self.provider, response)
+            return {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+
+        input_key = "prompt_tokens" if "prompt_tokens" in usage else "input_tokens"
+        output_key = "completion_tokens" if "completion_tokens" in usage else "output_tokens"
+        prompt_tokens = usage.get(input_key, 0)
+        completion_tokens = usage.get(output_key, 0)
+        total_tokens = usage.get("total_tokens", 0)
+        if not total_tokens:
+            total_tokens = prompt_tokens + completion_tokens
+
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
+
     def _record_metrics(
             self,
             model: str,
@@ -269,20 +257,18 @@ class BaseLLM(ABC):
         log_line = f"LLM output status={status} for provider={self.provider}, model={model}, agent_role={agent_role}, duration={duration:.3f}s"
 
         if usage:
-            input_key = "prompt_tokens" if "prompt_tokens" in usage else "input_tokens"
-            output_key = "completion_tokens" if "completion_tokens" in usage else "output_tokens"
             LLM_INPUT_TOKENS.labels(
                 provider=self.provider,
                 model=model,
                 agent_role=agent_role,
-            ).inc(usage[input_key])
+            ).inc(usage["prompt_tokens"])
 
             LLM_OUTPUT_TOKENS.labels(
                 provider=self.provider,
                 model=model,
                 agent_role=agent_role,
-            ).inc(usage[output_key])
-            log_line += f", input_tokens={usage[input_key]}, output_tokens={usage[output_key]}"
+            ).inc(usage["completion_tokens"])
+            log_line += f", input_tokens={usage["prompt_tokens"]}, output_tokens={usage["completion_tokens"]}"
 
         elif response:
             # Log only once per provider/model to avoid log flooding
@@ -296,6 +282,7 @@ class BaseLLM(ABC):
                 )
                 _missing_usage_logged.add(key)
 
+        print(log_line)
         if status == "SUCCESS":
             logger.info(log_line)
         else:
