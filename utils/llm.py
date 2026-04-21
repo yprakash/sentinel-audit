@@ -11,6 +11,7 @@ from typing import Any, Optional
 from prometheus_client import Histogram, Counter
 
 from utils.metrics import start_metrics_server
+from utils.shutdown_manager import shutdown_manager
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ async def shutdown_llm_client(client = None, active_tasks: set[asyncio.Task] = N
 
     if client:
         logger.info(f"Closing {client_name} client...")
-        await client.close()
+        await client.aclose()
 
     duration = time.perf_counter() - start
     logger.info(f"Graceful shut down of {client_name} Completed in {duration} seconds")
@@ -122,12 +123,12 @@ def extract_usage(response: Any) -> Optional[dict]:
     return None
 
 
-async def init(port: int, app_name: str, shutdown_event, interval: int):
+def init(port: int, app_name: str, shutdown_event, interval: int):
     """
     Initialize metrics server once per service.
     Should be called during application startup.
     """
-    await start_metrics_server(port, app_name, shutdown_event, interval)
+    start_metrics_server(port, app_name, shutdown_event, interval)
 
 
 class BaseLLM(ABC):
@@ -155,6 +156,13 @@ class BaseLLM(ABC):
         self.model = model
         self.agent_role = agent_role if agent_role else "unknown"
         self.semaphore = Semaphore(max_concurrent)
+        self.active_tasks: set[asyncio.Task] = set()
+        # It is must to register after instantiation for graceful shutdown
+        shutdown_manager.register(self)
+
+    @abstractmethod
+    async def shutdown(self) -> None:
+        pass
 
     @abstractmethod
     def extract_usage(self, response):
@@ -202,6 +210,9 @@ class BaseLLM(ABC):
         if model is None or not model:
             model = self.model
 
+        current_task = asyncio.current_task()
+        self.active_tasks.add(current_task)
+
         try:
             async with self.semaphore:
                 response = await self._generate_impl(model=model, **kwargs)
@@ -213,6 +224,7 @@ class BaseLLM(ABC):
             raise e
 
         finally:
+            self.active_tasks.discard(current_task)
             duration = time.perf_counter() - start
             self._record_metrics(
                 model=model,

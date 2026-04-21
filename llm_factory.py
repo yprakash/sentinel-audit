@@ -24,20 +24,20 @@ _LLM_CACHE: Dict[str, BaseLLM] = {}
 
 
 # _PROVIDERS = {"anthropic": AnthropicClient, "groq": GroqClient, "openai": OpenAIClient}
+module_map = {
+    "mock": "utils.mock_llm",
+    "groq": "utils.groq_utils",
+    "openai": "utils.openai_utils",
+    "anthropic": "utils.anthropic_utils",
+}
 
 
 def create_llm(provider: str, **kwargs) -> BaseLLM:
     """
-    Returns a cached LLM instance if already created. Otherwise creates, caches, and returns it.
+    Returns a cached LLM instance if already created. Otherwise, creates, caches, and returns it.
     This gives singleton-like behavior per provider.
     """
     # key = (provider, model)
-    module_map = {
-        "mock": "utils.mock_llm",
-        "groq": "utils.groq_utils",
-        "openai": "utils.openai_utils",
-        "anthropic": "utils.anthropic_utils",
-    }
     if provider not in module_map:
         raise ValueError(f"Unknown provider: {provider}")
     module = importlib.import_module(module_map[provider])
