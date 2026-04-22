@@ -178,13 +178,8 @@ class MLX_LLM(BaseLLM):
             top_p: float = 0.95,
             **kwargs,
     ) -> Any:
-        loop = asyncio.get_running_loop()  # get_event_loop() in Legacy / sync entry points
-
-        # mlx_lm.generate is blocking (CPU-bound)
-        # run_in_executor avoids blocking event loop; asyncio.create_task() doesn’t
-        response = await loop.run_in_executor(
-            None,
-            self.client.generate,
+        # mlx_lm.generate is blocking, which is expected because computation is CPU/GPU-bound
+        response = self.client.generate(
             model,
             messages,
             max_tokens,
@@ -194,17 +189,17 @@ class MLX_LLM(BaseLLM):
         )
 
         # Normalize response to OpenAI-like format
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": response["text"],
-                    }
+        output = response.pop("text")
+        response["choices"] = [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": output,
                 }
-            ],
-            "usage": response["usage"],
-        }
+            }
+        ]
+        self.write_llm_output(response)
+        return response
 
 
 LLMRegistry.register("mlx", MLX_LLM)
