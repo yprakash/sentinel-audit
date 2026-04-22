@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict
+from getpass import getpass
+from typing import Any
 
 import httpx
 from anthropic import (
@@ -23,10 +24,6 @@ from utils.llm import shutdown_llm_client, BaseLLM
 logger = logging.getLogger(__name__)
 _anthropic_client = None
 active_tasks: set[asyncio.Task] = set()
-
-
-async def shutdown():
-    await shutdown_llm_client(_anthropic_client, active_tasks)
 
 
 def get_anthropic_client():
@@ -56,6 +53,9 @@ class AnthropicClient(BaseLLM):
         super().__init__("anthropic", model, agent_role)
         self._client = get_anthropic_client()  # ensure shared client usage
 
+    async def shutdown(self) -> None:
+        await shutdown_llm_client(self._client, self.active_tasks)
+
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
         Provider-specific implementation using Anthropic Messages API.
@@ -82,7 +82,7 @@ class AnthropicClient(BaseLLM):
                 **kwargs,
             )
             if response:
-                self.write_llm_output(response)
+                self.write_llm_output(response.content[0].text)  # ToDo Correct the input param
             return response.content[0].text
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible in Anthropic") from e
@@ -105,31 +105,24 @@ class AnthropicClient(BaseLLM):
         finally:
             active_tasks.discard(task)
 
-    def extract_usage(self, response: Any) -> Dict[str, int]:
-        """
-        Extract token usage from Anthropic response.
-
-        Anthropic usage format:
-            response.usage.input_tokens
-            response.usage.output_tokens
-        """
-        usage = getattr(response, "usage", None)
-
-        if not usage:
-            return {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            }
-
-        prompt_tokens = getattr(usage, "input_tokens", 0)
-        completion_tokens = getattr(usage, "output_tokens", 0)
-
-        return {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        }
-
 
 LLMRegistry.register("anthropic", AnthropicClient)
+
+
+async def main() -> None:
+    model_name = input("Model: ")  # "claude-haiku-4-5"
+    llm = AnthropicClient(model=model_name, agent_role="healthcheck")
+
+    response = await llm.generate(
+        messages=[
+            {"role": "user", "content": "Say OK"}
+        ],
+        temperature=0.0,
+        max_tokens=10,
+    )
+    print(response)
+
+
+if __name__ == "__main__":
+    os.environ["ANTHROPIC_API_KEY"] = getpass(f"Enter ANTHROPIC_API_KEY: ")
+    asyncio.run(main())
