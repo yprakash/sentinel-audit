@@ -25,10 +25,6 @@ logger = logging.getLogger(__name__)
 _openai_client = None
 
 
-# Track in-flight LLM calls for graceful shutdown
-active_tasks: set[asyncio.Task] = set()
-
-
 def get_openai_client():
     global _openai_client
     if not _openai_client:
@@ -51,14 +47,13 @@ def get_openai_client():
     return _openai_client
 
 
-async def shutdown():
-    await shutdown_llm_client(_openai_client, active_tasks)
-
-
 class OpenAIClient(BaseLLM):
     def __init__(self, model, agent_role) -> None:
         super().__init__("openai", model, agent_role)
         self._client = get_openai_client()  # ensure shared client usage
+
+    async def shutdown(self) -> None:
+        await shutdown_llm_client(self._client, self.active_tasks)
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
@@ -74,12 +69,11 @@ class OpenAIClient(BaseLLM):
         Returns:
             Raw OpenAI SDK response object.
         """
-        task = asyncio.current_task()
-        active_tasks.add(task)
-
         try:
-            # If upstream still sends `messages`, map to `input`
-            # if "messages" in kwargs: kwargs["input"] = kwargs.pop("messages")
+            if "messages" in kwargs:
+                kwargs["input"] = kwargs.pop("messages")
+            if "max_tokens" in kwargs:
+                kwargs["max_output_tokens"] = kwargs.pop("max_tokens")
 
             response = await self._client.responses.create(
                 model=model,
@@ -108,8 +102,6 @@ class OpenAIClient(BaseLLM):
             raise RuntimeError("Unexpected OpenAI API error") from e
         except Exception as e:
             raise RuntimeError("Unknown error occurred while calling OpenAI") from e  # Final safety net
-        finally:
-            active_tasks.discard(task)
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
         """
@@ -143,3 +135,33 @@ class OpenAIClient(BaseLLM):
 
 
 LLMRegistry.register("openai", OpenAIClient)
+
+
+# Below main methods are just to test connection. Can't be used anywhere
+async def main() -> None:
+    model_name = "gpt-4o-mini"  # input("Model: ")
+    llm = OpenAIClient(model=model_name, agent_role="healthcheck")
+
+    try:
+        response = await llm.generate(
+            messages=[
+                {"role": "user", "content": "Say OK"}
+            ],
+            temperature=0.0,
+            max_tokens=16,
+        )
+        print(response["choices"][0]["message"]["content"])
+    except RuntimeError as re:
+        models = await llm.get_available_models()
+        print(f"Available models: {models}")
+        if isinstance(re.__cause__, RateLimitError):
+            print("RateLimitError (but connection is OK)")
+        else:
+            print("Other runtime error:", re)
+
+
+if __name__ == "__main__":
+    from getpass import getpass
+
+    os.environ["OPENAI_API_KEY"] = getpass(f"Enter OPENAI_API_KEY: ")
+    asyncio.run(main())

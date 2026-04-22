@@ -143,6 +143,14 @@ class BaseLLM(ABC):
         """
         raise NotImplementedError
 
+    async def get_available_models(self):
+        try:
+            models = await self._client.models.list()
+            print("Connected to OpenAI. Models available:", len(models.data))
+            return models.data
+        except Exception as e:
+            print("Connection failed:", type(e).__name__, str(e))
+
     def write_llm_output(self, output):
         file_path = f"mocked_outputs/{self.agent_role}.txt"
         with open(file_path, 'a') as file:

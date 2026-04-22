@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-from getpass import getpass
 from typing import Any
 
 import httpx
@@ -23,7 +22,6 @@ from utils.llm import shutdown_llm_client, BaseLLM
 
 logger = logging.getLogger(__name__)
 _anthropic_client = None
-active_tasks: set[asyncio.Task] = set()
 
 
 def get_anthropic_client():
@@ -74,8 +72,6 @@ class AnthropicClient(BaseLLM):
         - Requires max_tokens
         - System prompt is separate (system=...)
         """
-        task = asyncio.current_task()
-        active_tasks.add(task)
         try:
             response = await self._client.messages.create(
                 model=model,
@@ -102,13 +98,12 @@ class AnthropicClient(BaseLLM):
             raise RuntimeError("Unexpected Anthropic API error") from e
         except Exception as e:
             raise RuntimeError("Unknown error occurred while calling Anthropic") from e
-        finally:
-            active_tasks.discard(task)
 
 
 LLMRegistry.register("anthropic", AnthropicClient)
 
 
+# Below main methods are just to test connection. Can't be used anywhere
 async def main() -> None:
     model_name = input("Model: ")  # "claude-haiku-4-5"
     llm = AnthropicClient(model=model_name, agent_role="healthcheck")
@@ -124,5 +119,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    from getpass import getpass
+
     os.environ["ANTHROPIC_API_KEY"] = getpass(f"Enter ANTHROPIC_API_KEY: ")
     asyncio.run(main())
