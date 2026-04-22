@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 from groq import (
@@ -22,11 +22,6 @@ from utils.llm import shutdown_llm_client, BaseLLM
 logger = logging.getLogger(__name__)
 
 _groq_client = None
-active_tasks: set[asyncio.Task] = set()
-
-
-async def shutdown():
-    await shutdown_llm_client(_groq_client, active_tasks)
 
 
 def get_groq_client():
@@ -45,16 +40,6 @@ def get_groq_client():
     return _groq_client
 
 
-async def shutdown():
-    if active_tasks:  # wait for in-flight LLM calls
-        logger.info(f"Waiting {len(active_tasks)} groq active tasks")
-        await asyncio.gather(*active_tasks, return_exceptions=True)
-
-    if _groq_client:
-        logger.info("Closing AsyncGroq client...")
-        await _groq_client.close()
-
-
 class GroqClient(BaseLLM):
     def __init__(
             self,
@@ -63,6 +48,9 @@ class GroqClient(BaseLLM):
     ) -> None:
         super().__init__("groq", model, agent_role)
         self._client = get_groq_client()  # ensure shared client usage
+
+    async def shutdown(self) -> None:
+        await shutdown_llm_client(self._client, self.active_tasks)
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
         """
@@ -78,16 +66,15 @@ class GroqClient(BaseLLM):
         Returns:
             Raw Groq SDK response object (converted to dict if needed).
         """
-        task = asyncio.current_task()
-        active_tasks.add(task)
         try:
             response = await self._client.chat.completions.create(
                 model=model,
                 **kwargs,
             )
             if response:
+                response = response.model_dump(mode="json")
                 self.write_llm_output(response)
-            return response.choices[0].message
+            return response
 
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible in Groq") from e
@@ -105,36 +92,27 @@ class GroqClient(BaseLLM):
             raise RuntimeError(f"Groq API returned error status {e.status_code}") from e
         except Exception as e:
             raise RuntimeError("Unexpected Groq API error") from e  # Future-proof catch-all
-        finally:
-            active_tasks.discard(task)
-
-    def extract_usage(self, response: Any) -> Dict[str, int]:
-        """
-        Extract token usage from Groq response.
-        BaseLLM calls this after _generate_impl to update metrics.
-        Returns:
-            {
-                "prompt_tokens": int,
-                "completion_tokens": int,
-                "total_tokens": int
-            }
-        """
-        usage = getattr(response, "usage", None)
-        print(f"type={type(response)}: {response}")
-
-        if not usage:
-            logger.warning(f"Groq API returned empty usage response: {response}")
-            return {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            }
-
-        return {
-            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-            "completion_tokens": getattr(usage, "completion_tokens", 0),
-            "total_tokens": getattr(usage, "total_tokens", 0),
-        }
 
 
 LLMRegistry.register("groq", GroqClient)
+
+
+# Below main methods are just to test connection. Can't be used anywhere
+async def main() -> None:
+    model_name = "llama-3.1-8b-instant"  # input("Model: ")
+    llm = GroqClient(model=model_name, agent_role="healthcheck")
+    response = await llm.generate(
+        messages=[
+            {"role": "user", "content": "Say OK"}
+        ],
+        temperature=0.0,
+        max_tokens=16,
+    )
+    print(response)
+
+
+if __name__ == "__main__":
+    from getpass import getpass
+
+    os.environ["GROQ_API_KEY"] = getpass(f"Enter GROQ_API_KEY: ")
+    asyncio.run(main())

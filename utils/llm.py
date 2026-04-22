@@ -146,25 +146,20 @@ class BaseLLM(ABC):
     async def get_available_models(self):
         try:
             models = await self._client.models.list()
-            print("Connected to OpenAI. Models available:", len(models.data))
             return models.data
         except Exception as e:
             print("Connection failed:", type(e).__name__, str(e))
 
-    def write_llm_output(self, output):
-        file_path = f"mocked_outputs/{self.agent_role}.txt"
-        with open(file_path, 'a') as file:
-            file.write(output + os.linesep)
-        log_line = f"Written LLM output to {file_path}"
+    def write_llm_output(self, output: dict) -> None:
+        def _save_json(file_path: str, data: Any) -> None:
+            with open(file_path, "w") as f:
+                json.dump(data, f, indent=2)
+            logger.info("Written %s LLM output to %s", self.provider, file_path)
 
-        output_dict = json.loads(output)
-        if isinstance(output_dict, dict):
-            file_path = f"mocked_outputs/{self.agent_role}.json"
-            with open(file_path, 'w') as file:
-                json.dump(output_dict, file, indent=4)
-            log_line += f" as well as {file_path}"
-
-        logger.info(log_line)
+        file_path = f"mocked_outputs/{self.agent_role}.json"
+        _save_json(file_path, output)
+        file_path = f"mocked_outputs/{self.agent_role}_{int(time.time())}.json"
+        _save_json(file_path, output)
 
     async def generate(self, model: str = None, **kwargs) -> Any:
         """
