@@ -4,7 +4,7 @@ from typing import Any, Optional, Dict
 
 import httpx
 
-from llm import BaseLLM, shutdown_llm_client, extract_usage as base_extract_usage
+from llm import BaseLLM, shutdown_llm_client
 from llm_registry import LLMRegistry
 
 
@@ -41,15 +41,6 @@ class OllamaClient(BaseLLM):
     async def shutdown(self) -> None:
         # await self.client.aclose()
         await shutdown_llm_client(self.client, self.active_tasks)
-
-    def extract_usage(self, response: Any) -> Optional[dict]:
-        # Ollama returns eval_count / prompt_eval_count (map to usage)
-        if isinstance(response, dict):
-            return {
-                "prompt_tokens": response.get("prompt_eval_count", 0),
-                "completion_tokens": response.get("eval_count", 0),
-            }
-        return base_extract_usage(response)
 
     async def _generate_impl(
             self,
@@ -88,20 +79,16 @@ class OllamaClient(BaseLLM):
 
         data = response.json()
         # Normalize to OpenAI-like response
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "role": "assistant",
-                        "content": data.get("message", {}).get("content", ""),
-                    }
-                }
-            ],
+        result = {
+            "choices": [{"message": data.pop("message")}],
             "usage": {
                 "prompt_tokens": data.get("prompt_eval_count", 0),
                 "completion_tokens": data.get("eval_count", 0),
             },
         }
+        result.update(data)
+        self.write_llm_output(result)
+        return result
 
 
 LLMRegistry.register("ollama", OllamaClient)
