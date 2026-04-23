@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 from openai import (
@@ -80,8 +80,9 @@ class OpenAIClient(BaseLLM):
                 **kwargs,
             )
             if response:
+                response = response.model_dump(mode="json")
                 self.write_llm_output(response)
-            return response.choices[0].message
+            return response
 
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible") from e
@@ -102,36 +103,6 @@ class OpenAIClient(BaseLLM):
             raise RuntimeError("Unexpected OpenAI API error") from e
         except Exception as e:
             raise RuntimeError("Unknown error occurred while calling OpenAI") from e  # Final safety net
-
-    def extract_usage(self, response: Any) -> Dict[str, int]:
-        """
-        Extract token usage from Responses API.
-
-        Called by BaseLLM after _generate_impl to update metrics.
-        Returns:
-            {
-                "prompt_tokens": int,
-                "completion_tokens": int,
-                "total_tokens": int
-            }
-        """
-        usage = getattr(response, "usage", None)
-
-        if not usage:
-            return {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            }
-
-        input_tokens = getattr(usage, "input_tokens", 0)
-        output_tokens = getattr(usage, "output_tokens", 0)
-
-        return {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }
 
 
 LLMRegistry.register("openai", OpenAIClient)

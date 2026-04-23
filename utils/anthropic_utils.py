@@ -78,8 +78,10 @@ class AnthropicClient(BaseLLM):
                 **kwargs,
             )
             if response:
-                self.write_llm_output(response.content[0].text)  # ToDo Correct the input param
-            return response.content[0].text
+                response = response.model_dump(mode="json")
+                self.write_llm_output(response)
+            return response
+
         except NotFoundError as e:
             raise ValueError(f"Model '{model}' does not exist or is not accessible in Anthropic") from e
         except BadRequestError as e:
@@ -105,7 +107,7 @@ LLMRegistry.register("anthropic", AnthropicClient)
 
 # Below main methods are just to test connection. Can't be used anywhere
 async def main() -> None:
-    model_name = input("Model: ")  # "claude-haiku-4-5"
+    model_name = "claude-haiku-4-5"  # input("Model: ")
     llm = AnthropicClient(model=model_name, agent_role="healthcheck")
 
     response = await llm.generate(
