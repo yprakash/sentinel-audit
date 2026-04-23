@@ -58,8 +58,9 @@ class KafkaClientFactory:
                         "acks": "all",  # durability: ensures data is committed to all replicas
                         "enable_idempotence": True,  # prevent duplicate writes during retries
                         "linger_ms": 5,  # batching
-                        "max_in_flight_requests_per_connection": 5,
-                        "retries": 5,
+                        # some of low-level network behaviors are NOT supported by aiokafka like below
+                        # "max_in_flight_requests_per_connection": 5,
+                        # "retries": 5,
                         # ToDo: Add Security Support hooks
                         # "security_protocol": "SASL_SSL",
                         # "sasl_mechanism": "PLAIN",
@@ -108,3 +109,32 @@ class KafkaClientFactory:
             logger.exception("Failed to start Kafka consumer")
             await consumer.stop()  # If start fails, ensure we don't leave a half-baked object
             raise
+
+
+async def main():
+    # Optional: override bootstrap servers if needed
+    # KafkaClientFactory.configure(bootstrap_servers="localhost:9092")
+    try:
+        # --- Test Producer Connectivity ---
+        producer = await KafkaClientFactory.get_producer()
+        print("Producer started successfully")
+
+        # --- Fetch cluster metadata (no produce/consume) ---
+        client = producer.client  # underlying aiokafka client
+        await client.bootstrap()  # ensure metadata is loaded
+
+        topics = list(client.cluster.topics())
+        print(f"Available topics: {topics}")
+
+        # --- Health Check ---
+        is_healthy = await KafkaClientFactory.is_healthy()
+        print("Kafka health check:", is_healthy)
+
+    except Exception as e:
+        logging.exception("Kafka connectivity test failed: %s", e)
+    finally:
+        await KafkaClientFactory.close_all()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

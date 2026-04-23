@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -10,9 +12,7 @@ from langgraph.checkpoint.base import (
     Checkpoint,
     CheckpointMetadata,
     CheckpointTuple,
-    SerializerProtocol,
 )
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from kafka_utils import KafkaClientFactory
 
@@ -70,9 +70,14 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
     - Consumers scan from beginning due to lack of key-based lookup
     """
 
-    def __init__(self, topic: str = "agent_checkpoints", serde: Optional[SerializerProtocol] = None):
+    def __init__(
+            self,
+            topic: str = "agent_checkpoints",
+            # serde: Optional[SerializerProtocol] = None
+    ):
+        # super().__init__(serde=serde or langgraph.checkpoint.serde.jsonplus.JsonPlusSerializer())
         self.topic = topic
-        super().__init__(serde=serde or JsonPlusSerializer())
+        super().__init__(serde=None)
 
     def _create_tuple(
             self,
@@ -114,23 +119,30 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
             # We seek to the beginning to find the specific ID or the latest
             await consumer.seek_to_beginning()  # O(N) scan for every read
 
-            async for msg in consumer:
-                counter += 1
-                # Kafka keys are bytes; LangGraph thread_ids are usually strings
-                msg_key = msg.key.decode("utf-8") if msg.key else None
+            # bounded wait (prevents infinite loop)
+            for _ in range(10):  # ~10 polling rounds
+                batch = await consumer.getmany(timeout_ms=500)
+                if not batch:
+                    break
 
-                if msg_key == thread_id:
-                    data = self.serde.deserialize(msg.value)
-                    checkpoint = data["checkpoint"]
-                    metadata = data.get("metadata", {})
-                    parent_config = data.get("parent_config", None)
+                for _, messages in batch.items():
+                    for msg in messages:
+                        counter += 1
+                        # Kafka keys are bytes; LangGraph thread_ids are usually strings
+                        msg_key = msg.key.decode("utf-8") if msg.key else None
 
-                    if checkpoint_id and checkpoint["id"] == checkpoint_id:
-                        found_tuple = self._create_tuple(config, checkpoint, metadata, parent_config)
-                        logger.debug(f"Found checkpoint {checkpoint_id} for thread {thread_id}")
-                        break
-                    elif not checkpoint_id:
-                        found_tuple = self._create_tuple(config, checkpoint, metadata, parent_config)
+                        if msg_key == thread_id:
+                            data = json.loads(msg.value.decode("utf-8"))
+                            checkpoint = data["checkpoint"]
+                            metadata = data.get("metadata", {})
+                            parent_config = data.get("parent_config", None)
+
+                            if checkpoint_id and checkpoint["id"] == checkpoint_id:
+                                found_tuple = self._create_tuple(config, checkpoint, metadata, parent_config)
+                                logger.debug(f"Found checkpoint {checkpoint_id} for thread {thread_id}")
+                                return found_tuple
+                            elif not checkpoint_id:
+                                found_tuple = self._create_tuple(config, checkpoint, metadata, parent_config)
 
         except Exception as e:
             logger.exception("Failed to retrieve checkpoint")
@@ -156,6 +168,7 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
         start_time = time.perf_counter()
         config = get_runnable_config(config)
         thread_id = config["configurable"]["thread_id"]
+
         consumer = await KafkaClientFactory.get_consumer(
             self.topic,
             enable_auto_commit=False,
@@ -163,28 +176,48 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
         )
 
         counter = 0
+
         try:
             await consumer.seek_to_beginning()
-            async for msg in consumer:
-                if msg.key.decode("utf-8") == thread_id:
-                    data = self.serde.deserialize(msg.value)
-                    checkpoint = data["checkpoint"]
-                    metadata = data.get("metadata", {})
-                    parent_config = data.get("parent_config", None)
 
-                    yield self._create_tuple(config, checkpoint, metadata, parent_config)
-                    counter += 1
-                    if limit and counter >= limit:
-                        break
+            # Use bounded polling instead of infinite async iteration
+            # This prevents hanging when no more messages are available
+            for _ in range(10):  # fixed number of polling rounds
+                batch = await consumer.getmany(timeout_ms=500)  # bounded wait per poll
+
+                # If no messages returned, assume topic exhausted → exit
+                if not batch:
+                    break
+
+                # batch is {TopicPartition: [messages]}
+                for _, messages in batch.items():
+                    for msg in messages:
+                        if msg.key.decode("utf-8") == thread_id:
+                            data = json.loads(msg.value.decode("utf-8"))
+
+                            checkpoint = data["checkpoint"]
+                            metadata = data.get("metadata", {})
+                            parent_config = data.get("parent_config", None)
+
+                            yield self._create_tuple(config, checkpoint, metadata, parent_config)
+
+                            counter += 1
+
+                            # Respect user-provided limit
+                            if limit and counter >= limit:
+                                return  # stop iteration early
 
         except Exception:
             logger.exception("Failed to list checkpoint")
+
         finally:
             await consumer.stop()
             elapsed = time.perf_counter() - start_time
 
-        logger.info("Checkpoint retrieved in %.6f seconds from %d kafka messages for thread %s.",
-                    elapsed, counter, thread_id)
+        logger.info(
+            "Checkpoint retrieved in %.6f seconds from %d kafka messages for thread %s.",
+            elapsed, counter, thread_id
+        )
 
     async def aput(
             self,
@@ -200,19 +233,28 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
             checkpoint: The checkpoint to store.
             metadata: Additional metadata for the checkpoint.
             new_versions: New channel versions as of this write.
-
         Returns:
             RunnableConfig: Updated configuration after storing the checkpoint.
+
+        NOTE: self.topic must have already been created before calling this method.
+        kafka-topics.sh \
+          --create \
+          --topic agent_checkpoints \
+          --bootstrap-server localhost:9092 \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config cleanup.policy=compact,delete \
+          --config min.insync.replicas=1
         """
         start_time = time.perf_counter()
         config = get_runnable_config(config)
         thread_id = config["configurable"]["thread_id"]
         producer = await KafkaClientFactory.get_producer()
-        payload = self.serde.serialize({
+        payload = json.dumps({
             "checkpoint": checkpoint,
             "metadata": metadata,
             "versions": new_versions,
-        })
+        }).encode("utf-8")
 
         try:
             await producer.send_and_wait(
@@ -227,3 +269,51 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
             raise
 
         return config
+
+
+async def main():
+    import uuid
+    from datetime import datetime, UTC
+    # Optional: configure Kafka
+    # KafkaClientFactory.configure(bootstrap_servers="localhost:9092")
+
+    saver = AsyncKafkaSaver(topic="agent_checkpoints")
+
+    # Minimal RunnableConfig structure expected by saver
+    thread_id = f"test-thread-{uuid.uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Dummy checkpoint + metadata
+    checkpoint = {
+        "id": str(uuid.uuid4()),
+        "ts": datetime.now(UTC).isoformat(),
+        "state": {"step": "test", "status": "ok"},
+    }
+    metadata = {"source": "connectivity-test"}
+    new_versions = {}  # minimal
+
+    try:
+        # --- Test WRITE (aput) ---
+        await saver.aput(config, checkpoint, metadata, new_versions)
+        print("Checkpoint write successful")
+
+        # --- Test READ (aget_tuple) ---
+        result = await saver.aget_tuple(config)
+        if result:
+            print("Checkpoint read successful:", result.checkpoint)
+        else:
+            print("ERROR: No checkpoint found for thread_id=", thread_id)
+
+        # --- Test LIST (alist) ---
+        print("Listing checkpoints:")
+        async for item in saver.alist(config, limit=5):
+            print(" - %s", item.checkpoint)
+
+    except Exception as e:
+        print("ERROR: Kafka checkpointing test failed: ", e)
+    finally:
+        await KafkaClientFactory.close_all()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
