@@ -33,49 +33,53 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
 
     Design:
     - Stores checkpoints with `thread_id` as the Kafka message key.
-    - Uses Kafka log compaction to retain only the latest checkpoint per thread_id.
-    - Provides a durable and fault-tolerant store for restoring latest agent state.
-    - Retrieval scans the entire topic and returns the latest checkpoint for the given thread_id.
+    - Designed to work with Kafka log compaction to retain the latest checkpoint per thread_id.
+    - Uses Kafka as a durable, append-only log for agent state persistence.
 
     Intended Use:
     - Restoring latest state in LangGraph workflows
     - Stateless agent recovery
-    - Kafka is being used as log-backed state store, but NOT stream processor. NO need for groups, commits, offsets.
+    - Audit-style checkpoint persistence (write-heavy, read-light)
+    - Kafka is used as a log-backed store, NOT a stream processor (no groups, commits, or offset tracking)
+
+    Read Behavior:
+    - Retrieval performs a bounded scan from the beginning using batched polling (`getmany`)
+    - Avoids infinite blocking by limiting polling iterations and time
+    - Returns the most recent checkpoint encountered during the scan (not strictly guaranteed latest)
 
     Limitations:
-    - No full checkpoint history (older states are removed by compaction)
-    - Kafka does not support direct key-based lookup; scans are required.
-    - Read performance depends on topic size (bounded via compaction)
+    - No direct key-based lookup; scans are required
+    - Latest checkpoint is not strictly guaranteed due to bounded reads
+    - Read completeness depends on polling limits and topic size
+    - Compaction is asynchronous; multiple versions may temporarily exist
 
-    Topic Requirements:
-    - cleanup.policy=compact
+    Topic Recommendations:
+    - cleanup.policy=compact (recommended for bounding topic size and improving scan performance)
     - Producers MUST use thread_id as key
-    - Kafka topic must use default partitioner
+    - Default partitioner should be used
     - Partition count should remain stable
 
-    Kafka Topic Creation:
+    Kafka Topic Creation (example):
         kafka-topics.sh \
           --create \
           --topic agent_checkpoints \
           --bootstrap-server localhost:9092 \
           --partitions 3 \
           --replication-factor 1 \
-          --config cleanup.policy=compact \
+          --config cleanup.policy=compact,delete \
           --config min.cleanable.dirty.ratio=0.01 \
           --config segment.ms=10000
 
     Operational Notes:
-    - Compaction is asynchronous; multiple versions may temporarily exist
-    - Ordering is guaranteed per partition (ensured via thread_id key)
-    - Consumers scan from beginning due to lack of key-based lookup
+    - Compaction is asynchronous
+    - Ordering is guaranteed per partition (via thread_id key)
+    - Read latency is bounded and predictable
     """
 
     def __init__(
             self,
             topic: str = "agent_checkpoints",
-            # serde: Optional[SerializerProtocol] = None
     ):
-        # super().__init__(serde=serde or langgraph.checkpoint.serde.jsonplus.JsonPlusSerializer())
         self.topic = topic
         super().__init__(serde=None)
 
@@ -200,12 +204,9 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
                             parent_config = data.get("parent_config", None)
 
                             yield self._create_tuple(config, checkpoint, metadata, parent_config)
-
                             counter += 1
-
-                            # Respect user-provided limit
                             if limit and counter >= limit:
-                                return  # stop iteration early
+                                return
 
         except Exception:
             logger.exception("Failed to list checkpoint")
@@ -235,16 +236,6 @@ class AsyncKafkaSaver(BaseCheckpointSaver):
             new_versions: New channel versions as of this write.
         Returns:
             RunnableConfig: Updated configuration after storing the checkpoint.
-
-        NOTE: self.topic must have already been created before calling this method.
-        kafka-topics.sh \
-          --create \
-          --topic agent_checkpoints \
-          --bootstrap-server localhost:9092 \
-          --partitions 3 \
-          --replication-factor 1 \
-          --config cleanup.policy=compact,delete \
-          --config min.insync.replicas=1
         """
         start_time = time.perf_counter()
         config = get_runnable_config(config)
@@ -284,8 +275,9 @@ async def main():
     config = {"configurable": {"thread_id": thread_id}}
 
     # Dummy checkpoint + metadata
+    checkpoint_id = str(uuid.uuid4())
     checkpoint = {
-        "id": str(uuid.uuid4()),
+        "id": checkpoint_id,
         "ts": datetime.now(UTC).isoformat(),
         "state": {"step": "test", "status": "ok"},
     }
@@ -295,7 +287,7 @@ async def main():
     try:
         # --- Test WRITE (aput) ---
         await saver.aput(config, checkpoint, metadata, new_versions)
-        print("Checkpoint write successful")
+        print("Checkpoint write successful", checkpoint_id)
 
         # --- Test READ (aget_tuple) ---
         result = await saver.aget_tuple(config)
@@ -307,7 +299,7 @@ async def main():
         # --- Test LIST (alist) ---
         print("Listing checkpoints:")
         async for item in saver.alist(config, limit=5):
-            print(" - %s", item.checkpoint)
+            print(item.checkpoint)
 
     except Exception as e:
         print("ERROR: Kafka checkpointing test failed: ", e)
