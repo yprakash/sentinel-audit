@@ -66,3 +66,60 @@ async def run_with_timeout_logging(
         raise
     finally:
         warn_handle.cancel()  # Always cancel the scheduled warning callback
+
+
+# From here, all methods are just to test in local. Can't be used anywhere in application
+async def main():
+    import sys
+
+    logging.basicConfig(
+        level=logging.DEBUG,  # capture DEBUG and above
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        stream=sys.stdout,  # force stdout
+    )
+    logging.getLogger().setLevel(logging.DEBUG)
+
+    # ---- test coroutines ----
+    async def test_slow_task():
+        await asyncio.sleep(2)
+        return "done"
+
+    async def test_error_task():
+        await asyncio.sleep(0.5)
+        raise ValueError("boom")
+
+    # Case 1: completes but triggers warning (warn_after < runtime)
+    res1 = await run_with_timeout_logging(
+        test_slow_task(),
+        warn_after=1.0,
+        timeout=5.0,
+        name="test_slow_task",
+        context={"case": 1},
+    )
+    print("res1:", res1)
+
+    # Case 2: timeout
+    res2 = await run_with_timeout_logging(
+        test_slow_task(),
+        warn_after=1.0,
+        timeout=1.5,
+        name="timeout_task",
+        context={"case": 2},
+    )
+    print("res2:", res2)
+
+    # Case 3: exception inside coroutine
+    try:
+        await run_with_timeout_logging(
+            test_error_task(),
+            warn_after=1.0,
+            timeout=3.0,
+            name="test_error_task",
+            context={"case": 3},
+        )
+    except Exception as e:
+        print("caught:", repr(e))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
