@@ -4,6 +4,8 @@ import os
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
+from utils.shutdown_manager import shutdown_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,6 +15,10 @@ class KafkaClientFactory:
     _config = {
         "bootstrap_servers": os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
     }
+
+    @classmethod
+    def register_shutdown(cls, shutdown_mgr):
+        shutdown_mgr.register_callback(cls.close_all)
 
     @classmethod
     def configure(cls, **kwargs):
@@ -31,11 +37,19 @@ class KafkaClientFactory:
     async def close_all(cls):
         if cls._producer:
             try:
-                await cls._producer.flush()
+                async with asyncio.timeout(10):
+                    await cls._producer.flush()
+                    logger.info("Kafka Producer flush() completed")
+            except TimeoutError:
+                logger.warning("Kafka producer flush timed out")
+
+            try:
                 await cls._producer.stop()
-                logger.info("Closed Kafka Producer")
             finally:
                 cls._producer = None
+                logger.info("Closed Kafka Producer")
+        else:
+            logger.warning("Kafka producer not initialized or already closed")
 
     @classmethod
     async def flush_producer(cls):
@@ -109,6 +123,9 @@ class KafkaClientFactory:
             logger.exception("Failed to start Kafka consumer")
             await consumer.stop()  # If start fails, ensure we don't leave a half-baked object
             raise
+
+
+KafkaClientFactory.register_shutdown(shutdown_manager)
 
 
 async def main():
