@@ -7,6 +7,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from prometheus_client import Counter, Histogram
 
 from async_utils import run_with_timeout_logging
+from utils.checkpointing_utils import get_checkpointers_async
 
 SUCCESS = "success"
 FAILURE = "failure"
@@ -241,3 +242,60 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
                 logger.exception("%s.alist() FAILED", backend)
 
 
+async def main():
+    import sys
+    import uuid
+    from datetime import datetime, UTC
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    cps_to_test = ["AsyncKafkaSaver", "RedisSaver", "PostgreSQL", "PostgresWithPGvector"]
+    for cp in cps_to_test:
+        cp = await get_checkpointers_async([cp])
+        assert len(cp) == 1
+
+    thread_id = f"test-thread-{uuid.uuid4().hex[:8]}"
+    config = {"configurable": {"thread_id": thread_id}}
+    checkpoint_id = str(uuid.uuid4())  # Dummy checkpoint + metadata
+    checkpoint = {
+        "id": checkpoint_id,
+        "ts": datetime.now(UTC).isoformat(),
+        "state": {"step": "test", "status": "ok"},
+    }
+    metadata = {"source": "connectivity-test"}
+    new_versions = {}  # minimal
+
+    checkpointers = await get_checkpointers_async(cps_to_test)
+    composite_checkpointer = CompositeCheckpointSaver(checkpointers)
+
+    try:
+        # --- Test WRITE (aput) ---
+        await composite_checkpointer.aput(config, checkpoint, metadata, new_versions)
+        print("Checkpoint writes successful", checkpoint_id)
+
+        # --- Test READ (aget_tuple) ---
+        result = await composite_checkpointer.aget_tuple(config)
+        if result:
+            print("Checkpoint read successful:", result.checkpoint)
+        else:
+            print("ERROR: No checkpoint found for thread_id=", thread_id)
+
+        # --- Test LIST (alist) ---
+        print("Listing checkpoints:")
+        async for item in composite_checkpointer.alist(config, limit=5):
+            print(item.checkpoint)
+
+    except Exception as e:
+        print("ERROR: CompositeCheckpointSaver test failed: ", e)
+    # finally:
+        # await KafkaClientFactory.close_all()
+
+    print("=== Done ===")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
