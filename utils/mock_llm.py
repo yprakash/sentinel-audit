@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from llm_registry import LLMRegistry
 from utils.llm import BaseLLM
@@ -21,51 +21,24 @@ class MockClient(BaseLLM):
             self,
             model: str,
             agent_role: str,
-            # **kwargs: Any,
     ) -> None:
-        mock_file = f"mocked_outputs/{agent_role}"
-        self._mock_path = Path(mock_file + ".json")
+        mock_file = f"mocked_outputs/{agent_role}.json"
+        self._mock_path = Path(mock_file)
         if self._mock_path.exists():
-            self._mock_file = mock_file + ".json"
+            logger.info("MockClient reads LLM output from %s", self._mock_path)
         else:
-            self._mock_file = mock_file + ".txt"
-            self._mock_path = Path(self.mock_file)
+            raise FileNotFoundError(f"Mock file not found: {self._mock_path}")
 
-        if not self._mock_path.exists():
-            raise FileNotFoundError(
-                f"Mock file not found: {self._mock_path}"
-            )
-
-        logger.info(f"Using mock file: {self._mock_path}")
         super().__init__("mock", model, agent_role)
         self.model = model
 
     async def _generate_impl(self, model: str, **kwargs) -> Any:
-        """
-        Ignores prompt content. Returns pre-recorded JSON.
-        """
+        # Ignores prompt content. Returns pre-recorded JSON.
         with self._mock_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
+        logger.info("Got Mock data from %s", self._mock_path)
         return data
-
-    def extract_usage(self, response: Any) -> Dict[str, int]:
-        usage = getattr(response, "usage", None)
-        print(f"type={type(response)}: {response}")
-
-        if not usage:
-            logger.warning(f"Mock Data returned empty usage response: {response}")
-            return {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            }
-
-        return {
-            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-            "completion_tokens": getattr(usage, "completion_tokens", 0),
-            "total_tokens": getattr(usage, "total_tokens", 0),
-        }
 
 
 LLMRegistry.register("mock", MockClient)
