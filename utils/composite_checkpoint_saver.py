@@ -132,9 +132,12 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
                 self._record_metrics(backend, "aput", start, False)
                 logger.exception("Secondary write failed: %s", backend)
 
-    async def aget_tuple(self, config):
-        for cp in self.checkpointers:
+    async def aget_tuple(self, config, index=None):
+        for i, cp in enumerate(self.checkpointers):
             backend = cp.__class__.__name__
+            if index is not None and index != i:
+                continue
+
             start = time.perf_counter()
 
             try:
@@ -153,6 +156,10 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
         backend = primary.__class__.__name__
         start = time.perf_counter()
 
+        agent_name = config.get("configurable", {}).get("agent_name", "None")
+        if "checkpoint_ns" not in config["configurable"]:
+            config["configurable"]["checkpoint_ns"] = agent_name
+
         try:
             result = await run_with_timeout_logging(  # blocking, must succeed
                 primary.aput(config, checkpoint, metadata, new_versions),
@@ -162,7 +169,10 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
                 raise_on_timeout=True,  # Request should fail, MUST be True
             )
             self._record_metrics(backend, "aput", start, True)
-            logger.debug("Checkpoint written to PRIMARY %s.aput", backend)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.info("Checkpoint written to PRIMARY %s.aput in %.3f seconds",
+                            backend, time.perf_counter() - start)
+
         except Exception:
             self._record_metrics(backend, "aput", start, False)
             logger.exception("PRIMARY write FAILED: %s.aput", backend)
@@ -246,20 +256,24 @@ async def main():
     import sys
     import uuid
     from datetime import datetime, UTC
+    from utils.log_util import set_module_log_level
+    from utils.kafka_utils import KafkaClientFactory
 
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+    set_module_log_level('aiokafka')
 
-    cps_to_test = ["AsyncKafkaSaver", "RedisSaver", "PostgreSQL", "PostgresWithPGvector"]
+    cps_to_test = ["AsyncKafkaSaver", "AsyncRedisSaver", "PostgreSQL"]  #, "PostgresWithPGvector"]
     for cp in cps_to_test:
         cp = await get_checkpointers_async([cp])
         assert len(cp) == 1
 
     thread_id = f"test-thread-{uuid.uuid4().hex[:8]}"
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id, "agent_name": "testing"}}
+    logger.info("Testing with %s", config)
     checkpoint_id = str(uuid.uuid4())  # Dummy checkpoint + metadata
     checkpoint = {
         "id": checkpoint_id,
@@ -278,21 +292,23 @@ async def main():
         print("Checkpoint writes successful", checkpoint_id)
 
         # --- Test READ (aget_tuple) ---
-        result = await composite_checkpointer.aget_tuple(config)
-        if result:
-            print("Checkpoint read successful:", result.checkpoint)
-        else:
-            print("ERROR: No checkpoint found for thread_id=", thread_id)
+        for i, ckpt in enumerate(checkpointers):
+            try:
+                result = await composite_checkpointer.aget_tuple(config, i)
+                if result:
+                    logger.info("Checkpoint read %d successful: %s", i, result.checkpoint)
+            except Exception:
+                logger.exception("Cehckpoint read FAILED")
 
         # --- Test LIST (alist) ---
-        print("Listing checkpoints:")
+        logger.info("Listing checkpoints:")
         async for item in composite_checkpointer.alist(config, limit=5):
-            print(item.checkpoint)
+            logger.info(item.checkpoint)
 
-    except Exception as e:
-        print("ERROR: CompositeCheckpointSaver test failed: ", e)
-    # finally:
-        # await KafkaClientFactory.close_all()
+    except Exception:
+        logger.exception("ERROR: CompositeCheckpointSaver test failed: ")
+    finally:
+        await KafkaClientFactory.close_all()
 
     print("=== Done ===")
 
