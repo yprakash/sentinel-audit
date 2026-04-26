@@ -59,7 +59,7 @@ def setup_logging(
     )
 
 
-def set_module_log_level(module, log_level=logging.INFO):
+def set_module_log_level(module, log_level=logging.WARNING):
     if module:
         logging.getLogger(module).setLevel(log_level)
         logger.info('Changed log level for %s to %s', module, logging.getLevelName(log_level))

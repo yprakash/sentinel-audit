@@ -6,16 +6,23 @@ readme = "README.md"
 requires-python = ">=3.12.12"
 dependencies = [
     "aiohttp>=3.13.3",
+    "aiokafka>=0.13.0",
     "anthropic>=0.81.0",
+    "asyncpg>=0.31.0",
     "concurrent-log-handler>=0.9.28",
     "gitpython>=3.1.46",
     "groq>=1.0.0",
     "langgraph>=1.0.8",
+    "langgraph-checkpoint-postgres>=3.0.5",
     "langgraph-checkpoint-redis>=0.3.6",
     "mcp[cli]>=1.26.0",
+    "mlx-lm>=0.31.2",
+    "mlx-vlm>=0.4.4",
     "openai>=2.21.0",
+    "pgvector>=0.4.2",
     "prometheus-client>=0.24.1",
     "psutil>=7.2.2",
+    "psycopg>=3.3.3",
     "python-dotenv>=1.2.1",
     "redis>=7.1.1",
 ]

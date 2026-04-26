@@ -25,9 +25,11 @@ _LLM_CACHE: Dict[str, BaseLLM] = {}
 
 # _PROVIDERS = {"anthropic": AnthropicClient, "groq": GroqClient, "openai": OpenAIClient}
 module_map = {
+    "mlx": "utils.mlx_utils",
     "mock": "utils.mock_llm",
     "groq": "utils.groq_utils",
     "openai": "utils.openai_utils",
+    "ollama": "utils.ollama_utils",
     "anthropic": "utils.anthropic_utils",
 }
 

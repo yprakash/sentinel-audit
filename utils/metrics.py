@@ -68,7 +68,7 @@ import psutil
 from prometheus_client import start_http_server, Gauge
 
 logger = logging.getLogger(__name__)
-SystemMetricsTask = None
+SystemMetricsTask: asyncio.Task | None = None
 
 CPU_PERCENT = Gauge(
     "cpu_usage_percentage",
@@ -122,15 +122,17 @@ class SystemMetrics:
             ASYNC_TASKS_RUNNING.labels(self.service_name, self.hostname).set(
                 len(asyncio.all_tasks(asyncio.get_running_loop()))
             )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"System metrics published. CPU {psutil.cpu_percent(interval=None)}")
 
             await asyncio.sleep(self.interval)
 
         logger.info("Stopped metrics collection for %s", self.service_name)
 
 
-async def start_metrics_server(port, app_name, shutdown_event, interval):
+def start_metrics_server(port, app_name, shutdown_event, interval):
     global SystemMetricsTask
-    if SystemMetricsTask is None:
+    if SystemMetricsTask is None:  # or SystemMetricsTask.done(): # Idempotency edge case ToDo
         start_http_server(port)
         logger.info("Metrics server started on port %d", port)
 
@@ -143,7 +145,7 @@ async def start_metrics_server(port, app_name, shutdown_event, interval):
 async def main():
     shutdown_event = asyncio.Event()
 
-    task = await start_metrics_server(9518, "test", shutdown_event, 1)
+    task = start_metrics_server(9518, "test", shutdown_event, 1)
 
     await shutdown_event.wait()
     await task

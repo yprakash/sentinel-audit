@@ -14,7 +14,7 @@ from langgraph.checkpoint.base import (
     CheckpointTuple,
 )
 
-from kafka_utils import KafkaClientFactory
+from utils.kafka_utils import KafkaClientFactory
 
 logger = logging.getLogger(__name__)
 

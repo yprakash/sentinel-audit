@@ -92,6 +92,8 @@ def setup_signal_handlers(loop: asyncio.AbstractEventLoop | None = None):
     loop = loop or asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGINT, _handler)
     loop.add_signal_handler(signal.SIGTERM, _handler)
+    # asyncio.get_running_loop().add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(shutdown(shutdown_event)))
+    # asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(shutdown(shutdown_event)))
 
 
 shutdown_manager = _ShutdownManager()
