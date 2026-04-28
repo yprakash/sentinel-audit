@@ -202,7 +202,7 @@ class BaseLLM(ABC):
             )
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
-        usage = response.get("usage", None)
+        usage = response.get("usage", None) if response else None
         if not usage:
             logger.warning("%s LLM returned empty usage response: %s", self.provider, response)
             return {
@@ -285,7 +285,6 @@ class BaseLLM(ABC):
                 )
                 _missing_usage_logged.add(key)
 
-        print(log_line)
         if status == "SUCCESS":
             logger.info(log_line)
         else:
