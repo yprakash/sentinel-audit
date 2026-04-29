@@ -171,7 +171,7 @@ class MLX_LLM(BaseLLM):
 
     async def _generate_impl(
             self,
-            model: str,
+            model: str | None = None,
             messages: Union[str, list[dict]] | None = None,
             max_tokens: int = 512,
             temperature: float = 0.7,
@@ -179,6 +179,11 @@ class MLX_LLM(BaseLLM):
             **kwargs,
     ) -> Any:
         # mlx_lm.generate is blocking, which is expected because computation is CPU/GPU-bound
+        if not model and self.model:
+            model = self.model
+        if not model:
+            raise ValueError("No MLX model provided")
+
         response = self.client.generate(
             model,
             messages,
