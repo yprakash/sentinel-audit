@@ -62,6 +62,11 @@ class _ShutdownManager:
         logger.info(f"Starting shutdown of {len(callbacks)} components")
         tasks = [_run_target(t) for t in callbacks]
 
+        tasks = [
+            t if isinstance(t, asyncio.Task) else asyncio.create_task(t)
+            for t in tasks
+        ]
+
         try:
             if self.global_timeout:
                 await asyncio.wait_for(

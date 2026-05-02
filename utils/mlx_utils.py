@@ -6,7 +6,7 @@ from typing import Any, Dict, Union
 
 from mlx_lm import load, generate as mlx_generate
 
-from llm import BaseLLM, shutdown_llm_client
+from utils.llm import BaseLLM, shutdown_llm_client
 from llm_registry import LLMRegistry
 
 logger = logging.getLogger(__name__)

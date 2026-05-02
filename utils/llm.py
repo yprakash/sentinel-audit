@@ -85,7 +85,14 @@ async def shutdown_llm_client(client=None, active_tasks: set[asyncio.Task] = Non
 
     if client:
         logger.info(f"Closing {client_name} client...")
-        await client.aclose()
+        try:
+            await client.aclose()
+        except:
+            logger.info(f"{client_name}.aclose() failed...")
+            try:
+                await client.close()
+            except:
+                logger.info(f"{client_name}.close() failed...")
 
     duration = time.perf_counter() - start
     logger.info(f"Graceful shut down of {client_name} Completed in {duration} seconds")
