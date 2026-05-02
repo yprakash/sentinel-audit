@@ -1,15 +1,17 @@
 import asyncio
 import logging
 import os
+import time
 from typing import List, Any, Callable, Awaitable, Dict
 
+import psycopg
 import redis.asyncio as redis
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.redis import RedisSaver
 from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 
 from utils.kafka_checkpointing import AsyncKafkaSaver
-from utils.postgres_utils import get_postgres_checkpointer, get_pgvector_checkpointer
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +39,27 @@ async def create_kafka_checkpointer() -> AsyncKafkaSaver:
     return AsyncKafkaSaver()
 
 
+async def get_postgres_checkpointer():
+    start = time.perf_counter()
+    pg_url = os.getenv(
+        "POSTGRES_URL",
+        "postgresql://postgres:postgres@localhost:5432/postgres",
+    )
+
+    conn = await psycopg.AsyncConnection.connect(pg_url)
+    await conn.set_autocommit(True)  # REQUIRED for setup()
+
+    cp = AsyncPostgresSaver(conn)
+    await cp.setup()  # create tables
+
+    logger.info("AsyncPostgresSaver created in %.3f seconds from %s", time.perf_counter() - start, pg_url)
+    return cp
+
+
 CHECKPOINTER_CREATORS: Dict[str, Callable[[], Awaitable[Any]]] = {
     "AsyncRedisSaver": create_redis_checkpointer,
     "PostgreSQL": get_postgres_checkpointer,
-    "PostgresWithPGvector": get_pgvector_checkpointer,
+    # "PostgresWithPGvector": get_pgvector_checkpointer,
     "MemorySaver": create_memory_checkpointer,
     "AsyncKafkaSaver": create_kafka_checkpointer,
 }

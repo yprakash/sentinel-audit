@@ -15,6 +15,14 @@ postgres_checkpointer = None
 pgvector_checkpointer = None
 
 
+"""
+Do NOT use this custom wrapper. Use 
+This is:
+✅ correctly writing checkpoints, but
+❌ failing on write persistence
+❌ because wrapper breaks method routing
+NotImplementedError in aput_writes, though it is implemented.
+"""
 class _PostgresCheckpointer(BaseCheckpointSaver):
     def __init__(self):
         self.pg_url = os.getenv(
@@ -50,6 +58,7 @@ class _PostgresCheckpointer(BaseCheckpointSaver):
             metadata: CheckpointMetadata,
             new_versions: ChannelVersions,
     ) -> RunnableConfig:
+        print("CUSTOM aput CALLED")
         if "channel_values" not in checkpoint:
             checkpoint["channel_values"] = {}
         if "channel_versions" not in checkpoint:
@@ -59,6 +68,24 @@ class _PostgresCheckpointer(BaseCheckpointSaver):
 
         result = await self._client.aput(config, checkpoint, metadata, new_versions)
         return result
+
+    def put_writes(self, config: RunnableConfig, writes, task_id: str, task_path: str = ""):
+        print("CUSTOM put_writes CALLED")
+        return self._client.put_writes(
+            config,
+            writes,
+            task_id,
+            task_path,
+        )
+
+    async def aput_writes(self, config: RunnableConfig, writes, task_id: str, task_path: str = ""):
+        print("CUSTOM aput_writes CALLED")
+        return await self._client.aput_writes(
+            config,
+            writes,
+            task_id,
+            task_path,
+        )
 
 
 class _PGvectorCheckpointer(BaseCheckpointSaver):
