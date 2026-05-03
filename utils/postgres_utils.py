@@ -15,14 +15,6 @@ postgres_checkpointer = None
 pgvector_checkpointer = None
 
 
-"""
-Do NOT use this custom wrapper. Use 
-This is:
-✅ correctly writing checkpoints, but
-❌ failing on write persistence
-❌ because wrapper breaks method routing
-NotImplementedError in aput_writes, though it is implemented.
-"""
 class _PostgresCheckpointer(BaseCheckpointSaver):
     def __init__(self):
         self.pg_url = os.getenv(

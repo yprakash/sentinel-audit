@@ -113,24 +113,29 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
 
         task.add_done_callback(_cleanup)
 
-    async def _safe_aput(self, cp: BaseCheckpointSaver, config, checkpoint, metadata, new_versions):
-        backend = cp.__class__.__name__
+    async def _safe_execute(self, class_name: str, func, op_name: str, *args, **kwargs):
+        """
+        Generic execution wrapper for any checkpointer method.
+        func: The method to call (e.g., cp.aput or cp.aput_writes)
+        op_name: String for metrics/logging (e.g., 'aput')
+        args / kwargs: The positional/keyword arguments required by the function
+        """
         start = time.perf_counter()
 
         async with self._semaphore:
             try:
                 await run_with_timeout_logging(
-                    cp.aput(config, checkpoint, metadata, new_versions),
+                    func(*args, **kwargs),
                     warn_after=self.warn_after,
                     timeout=self.timeout,
-                    name=f"{backend}.aput",
+                    name=f"{class_name}.{op_name}",
                     raise_on_timeout=False,
                 )
-                self._record_metrics(backend, "aput", start, True)
-                logger.debug("Checkpoint written to %s", backend)
+                self._record_metrics(class_name, op_name, start, True)
+                logger.debug("Operation %s.%s executed", class_name, op_name)
             except Exception:
-                self._record_metrics(backend, "aput", start, False)
-                logger.exception("Secondary write failed: %s", backend)
+                self._record_metrics(class_name, op_name, start, False)
+                logger.exception("Operation %s.%s Failed", class_name, op_name)
 
     async def aget_tuple(self, config, index=None):
         for i, cp in enumerate(self.checkpointers):
@@ -180,11 +185,46 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
 
         for i in range(1, len(self.checkpointers)):
             cp = self.checkpointers[i]
+            backend = cp.__class__.__name__
             self._spawn_task(
-                self._safe_aput(cp, config, checkpoint, metadata, new_versions)
+                self._safe_execute(backend, cp.aput, "aput", config, checkpoint, metadata, new_versions)
             )  # non-blocking secondary writes
 
         return result
+
+    async def aput_writes(self, config, writes, task_id, task_path=""):
+        primary = self.checkpointers[0]
+        backend = primary.__class__.__name__
+        start = time.perf_counter()
+
+        agent_name = config.get("configurable", {}).get("agent_name", "None")
+        if "checkpoint_ns" not in config["configurable"]:
+            config["configurable"]["checkpoint_ns"] = agent_name
+
+        try:
+            await run_with_timeout_logging(
+                primary.aput_writes(config, writes, task_id, task_path=task_path),
+                warn_after=self.warn_after,
+                timeout=self.timeout,
+                name=f"{backend}.aput_writes",
+                raise_on_timeout=True,
+            )
+            self._record_metrics(backend, "aput_writes", start, True)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.info("Writes written to PRIMARY %s.aput_writes in %.3f seconds",
+                            backend, time.perf_counter() - start)
+
+        except Exception:
+            self._record_metrics(backend, "aput_writes", start, False)
+            logger.exception("PRIMARY writes write FAILED: %s.aput_writes", backend)
+            raise
+
+        for i in range(1, len(self.checkpointers)):
+            cp = self.checkpointers[i]
+            backend = cp.__class__.__name__
+            self._spawn_task(self._safe_execute(
+                backend, cp.aput_writes, "aput_writes", config, writes, task_id, task_path=task_path
+            ))
 
     async def aclose(self):
         # Wait for background tasks up to `timeout` seconds, then cancel remaining tasks.
