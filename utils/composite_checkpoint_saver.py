@@ -137,6 +137,16 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
                 self._record_metrics(class_name, op_name, start, False)
                 logger.exception("Operation %s.%s Failed", class_name, op_name)
 
+    def get_tuple(self, config):
+        for cp in self.checkpointers:
+            try:
+                result = cp.get_tuple(config)
+                if result is not None:
+                    return result
+            except Exception:
+                logger.exception("%s.get_tuple() FAILED", cp.__class__.__name__)
+        return None
+
     async def aget_tuple(self, config, index=None):
         for i, cp in enumerate(self.checkpointers):
             backend = cp.__class__.__name__
@@ -155,6 +165,28 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
                 logger.exception("%s.aget_tuple() FAILED", backend)
 
         return None
+
+    def put(self, config, checkpoint, metadata, new_versions):
+        primary = self.checkpointers[0]
+        result = primary.put(config, checkpoint, metadata, new_versions)
+
+        # We need to dispatch these Secondary Writes without blocking the main thread
+        for i in range(1, len(self.checkpointers)):
+            cp = self.checkpointers[i]
+            # Use the existing running loop to schedule the async task
+            try:
+                loop = asyncio.get_running_loop()
+                # Schedule the async call as a background task
+                loop.create_task(
+                    self._safe_execute(cp.__class__.__name__, cp.aput, "put", config, checkpoint, metadata,
+                                       new_versions)
+                )
+            except RuntimeError:
+                # Fallback: If no loop is running, we cannot easily spawn background tasks
+                # You might need to handle this via a ThreadPoolExecutor or document it as 'Sync-Only'
+                logger.warning("No running loop; cannot dispatch async background write to %s", cp.__class__.__name__)
+
+        return result
 
     async def aput(self, config, checkpoint, metadata, new_versions):
         primary = self.checkpointers[0]
@@ -191,6 +223,19 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
             )  # non-blocking secondary writes
 
         return result
+
+    def put_writes(self, config, writes, task_id, task_path=""):
+        self.checkpointers[0].put_writes(config, writes, task_id, task_path=task_path)
+
+        for cp in self.checkpointers[1:]:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    self._safe_execute(cp.__class__.__name__, cp.aput_writes, "put_writes", config, writes, task_id,
+                                       task_path)
+                )
+            except RuntimeError:
+                logger.warning("No running loop; cannot dispatch async background write to %s", cp.__class__.__name__)
 
     async def aput_writes(self, config, writes, task_id, task_path=""):
         primary = self.checkpointers[0]
@@ -240,6 +285,15 @@ class CompositeCheckpointSaver(BaseCheckpointSaver):
         await asyncio.gather(*pending, return_exceptions=True)  # Cancellation actually completes
         # Runs cleanup (finally blocks), Exits properly. Prevents “dangling tasks”
         logger.info("CompositeCheckpointSaver shutdown: %d done, %d cancelled", len(done), len(pending))
+
+    def list(self, config, **kwargs):
+        for cp in self.checkpointers:
+            try:
+                # Returns an Iterator[CheckpointTuple]
+                yield from cp.list(config, **kwargs)
+                return
+            except Exception:
+                logger.exception("%s.list() FAILED", cp.__class__.__name__)
 
     async def alist(self, config, **kwargs):
         """
