@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from state import AuditState
+from sentinel_audit.state import AuditState
 from utils.cryptography_utils import sha256_hex
 
 logger = logging.getLogger(__name__)
