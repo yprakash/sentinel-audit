@@ -39,6 +39,8 @@ def get_anthropic_client():
             anthropic_params["timeout"] = DEFAULT_TIMEOUT
 
         _anthropic_client = AsyncAnthropic(**anthropic_params)
+        logger.info("Initialized AsyncAnthropic instance")
+
     return _anthropic_client
 
 
@@ -50,6 +52,7 @@ class AnthropicClient(BaseLLM):
     ) -> None:
         super().__init__("anthropic", model, agent_role)
         self._client = get_anthropic_client()  # ensure shared client usage
+        logger.info("Initialized AnthropicClient for agent %s with model: %s", self.agent_role, self.model)
 
     async def shutdown(self) -> None:
         await shutdown_llm_client(self._client, self.active_tasks)

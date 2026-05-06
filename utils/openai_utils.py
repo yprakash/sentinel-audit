@@ -43,7 +43,8 @@ def get_openai_client():
             openai_params["timeout"] = DEFAULT_TIMEOUT
 
         _openai_client = AsyncOpenAI(**openai_params)
-        logger.info(f"Openai client created")
+        logger.info("Initialized AsyncOpenAI instance")
+
     return _openai_client
 
 
@@ -51,6 +52,7 @@ class OpenAIClient(BaseLLM):
     def __init__(self, model, agent_role) -> None:
         super().__init__("openai", model, agent_role)
         self._client = get_openai_client()  # ensure shared client usage
+        logger.info("Initialized OpenAIClient for agent %s with model: %s", self.agent_role, self.model)
 
     async def shutdown(self) -> None:
         await shutdown_llm_client(self._client, self.active_tasks)

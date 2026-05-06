@@ -28,6 +28,8 @@ def get_gemini_client() -> genai.Client:
                 timeout=timeout_ms,
             ),
         )
+        logger.info("Initialized google.genai.Client instance")
+
     return _gemini_client
 
 
@@ -35,6 +37,7 @@ class GeminiClient(BaseLLM):
     def __init__(self, model: str = None, agent_role: str = None) -> None:
         super().__init__("gemini", model, agent_role)
         self._client = get_gemini_client()
+        logger.info("Initialized GeminiClient for agent %s with model: %s", self.agent_role, self.model)
 
     async def shutdown(self) -> None:
         """

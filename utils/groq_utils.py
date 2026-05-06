@@ -37,6 +37,8 @@ def get_groq_client():
         else:
             groq_params["timeout"] = DEFAULT_TIMEOUT
         _groq_client = AsyncGroq(**groq_params)
+        logger.info("Initialized AsyncGroq instance")
+
     return _groq_client
 
 
@@ -48,6 +50,7 @@ class GroqClient(BaseLLM):
     ) -> None:
         super().__init__("groq", model, agent_role)
         self._client = get_groq_client()  # ensure shared client usage
+        logger.info("Initialized GroqClient for agent %s with model: %s", self.agent_role, self.model)
 
     async def shutdown(self) -> None:
         await shutdown_llm_client(self._client, self.active_tasks)

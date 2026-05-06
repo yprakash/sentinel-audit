@@ -18,9 +18,8 @@ async def strategist_agent(state: AuditState, llm: BaseLLM):
 
     logger.info("Strategist agent LLM call initiated")
     response = await llm.generate(messages=[{"role": "system", "content": prompt}])
-    response = response.model_dump()
 
-    content = json.loads(response.content)
+    content = json.loads(response["choices"][0]["message"]["content"])
     return {
         "business_logic_summary": content.get("business_logic_summary"),
         "invariants": content.get("invariants", []),

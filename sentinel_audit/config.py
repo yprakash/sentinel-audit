@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,19 +22,19 @@ class Settings(BaseSettings):
 
     # ---- Strategist Agent LLM ----
     STRATEGIST_PROVIDER: str = Field(default="mlx")
-    STRATEGIST_MODEL: str = Field(default="mlx-community/gemma-4-e2b-it-4bit")
+    STRATEGIST_MODEL: Optional[str] = Field(default=None)
 
     # ---- Adversary Agent LLM ----
     ADVERSARY_PROVIDER: str = Field(default="mlx")
-    ADVERSARY_MODEL: str = Field(default="mlx-community/gemma-4-e2b-it-4bit")
+    ADVERSARY_MODEL: Optional[str] = Field(default=None)
 
     # ---- Validator Agent LLM ----
     VALIDATOR_PROVIDER: str = Field(default="mlx")
-    VALIDATOR_MODEL: str = Field(default="mlx-community/gemma-4-e2b-it-4bit")
+    VALIDATOR_MODEL: Optional[str] = Field(default=None)
 
     # ---- Reporter Agent LLM ----
     REPORTER_PROVIDER: str = Field(default="mlx")
-    REPORTER_MODEL: str = Field(default="mlx-community/gemma-4-e2b-it-4bit")
+    REPORTER_MODEL: Optional[str] = Field(default=None)
 
 
 settings = Settings()

@@ -158,6 +158,7 @@ class MLX_LLM(BaseLLM):
             agent_role: str = None,
             max_concurrent: int = 2,
     ):
+        model = model or "mlx-community/gemma-4-e2b-it-4bit"
         super().__init__(
             provider="mlx",
             model=model,
@@ -165,6 +166,7 @@ class MLX_LLM(BaseLLM):
             max_concurrent=max_concurrent,
         )
         self.client = MLXClient()
+        logger.info("Initialized MLX_LLM for agent %s with model: %s", self.agent_role, self.model)
 
     async def shutdown(self) -> None:
         await shutdown_llm_client(self.client, self.active_tasks)

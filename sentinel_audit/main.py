@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from git import Repo
 
 from utils.initializer import init
+from utils.log_util import set_module_log_level
 from utils.shutdown_manager import shutdown_event, shutdown_manager
 
 load_dotenv()  # populate keys before importing classes (instantiated)
@@ -128,6 +129,9 @@ async def main():
         parser.error("At least one of --user-id or --thread-id must be provided.")
 
     init(Path(__file__).parent.name)
+    set_module_log_level("httpcore")
+    set_module_log_level("httpx", logging.INFO)
+
     try:
         await run_audit(args.user_id, args.target, args.thread_id, args.docs)
     except KeyboardInterrupt:
