@@ -233,13 +233,16 @@ class BaseLLM(ABC):
         output_key = "completion_tokens" if "completion_tokens" in usage else "output_tokens"
         prompt_tokens = usage.get(input_key, 0)
         completion_tokens = usage.get(output_key, 0)
+        thinking_tokens = usage.get("thinking_tokens", 0)
+
         total_tokens = usage.get("total_tokens", 0)
         if not total_tokens:
-            total_tokens = prompt_tokens + completion_tokens
+            total_tokens = prompt_tokens + completion_tokens + thinking_tokens
 
         return {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "thinking_tokens": thinking_tokens,
             "total_tokens": total_tokens,
         }
 
