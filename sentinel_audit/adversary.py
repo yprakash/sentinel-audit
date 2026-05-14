@@ -16,7 +16,12 @@ async def adversary_agent(state: AuditState, llm: BaseLLM):
     )
 
     logger.info("Adversary agent LLM call initiated")
-    response = await llm.generate(prompt)
+    response = await llm.generate(
+        prompt,
+        top_p=0.95,
+        temperature=0.8,  # ONLY stage where creativity matters in sentinel_audit
+        max_output_tokens=8192,
+    )
 
     return {
         "findings": [response]

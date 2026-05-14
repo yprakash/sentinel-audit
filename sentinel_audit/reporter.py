@@ -15,7 +15,14 @@ async def reporter_agent(state: AuditState, llm: BaseLLM):
     )
 
     logger.info("Reporter agent LLM call initiated")
-    response = await llm.generate(prompt)
+
+    # Reporter is a polished professional writer
+    response = await llm.generate(
+        prompt,
+        top_p=0.9,
+        temperature=0.4,
+        max_output_tokens=8192,
+    )
 
     return {
         "report": response

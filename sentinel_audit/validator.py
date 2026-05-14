@@ -16,7 +16,13 @@ async def validator_agent(state: AuditState, llm: BaseLLM):
     )
 
     logger.info("Validator agent LLM call initiated")
-    response = await llm.generate(prompt)
+    # Validator should behave almost like a compiler/interpreter.
+    response = await llm.generate(
+        prompt,
+        top_p=0.7,
+        temperature=0.0,  # no creative interpretation
+        max_output_tokens=4096,
+    )
 
     return {
         "report": response

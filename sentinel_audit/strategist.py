@@ -1,4 +1,3 @@
-import json
 import logging
 
 from sentinel_audit.prompts import STRATEGIST_AGENT_PROMPT
@@ -17,9 +16,14 @@ async def strategist_agent(state: AuditState, llm: BaseLLM):
     )
 
     logger.info("Strategist agent LLM call initiated")
-    response = await llm.generate(messages=[{"role": "system", "content": prompt}])
+    response = await llm.generate(
+        messages=[{"role": "system", "content": prompt}],
+        top_p=0.8,
+        temperature=0.1,  # Low reduces hallucinated invariants
+        max_output_tokens=4096,
+    )
+    content = llm.get_ai_message_from_response(response)
 
-    content = json.loads(response["choices"][0]["message"]["content"])
     return {
         "business_logic_summary": content.get("business_logic_summary"),
         "invariants": content.get("invariants", []),
