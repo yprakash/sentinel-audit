@@ -45,6 +45,12 @@ LLM_OUTPUT_TOKENS = Counter(
     ["provider", "model", "agent_role"],
 )
 
+LLM_THINKING_TOKENS = Counter(
+    "llm_tokens_thinking_total",
+    "Total thinking tokens",
+    ["provider", "model", "agent_role"],
+)
+
 # Metrics for future use
 LLM_TOKENS_TOTAL = Counter(
     "llm_tokens_total",
@@ -127,13 +133,18 @@ class BaseLLM(ABC):
         self.provider = provider.strip()
         if model is None:
             key = self.provider.upper() + "_MODEL_NAME"
-            model = os.environ.get(key, "")
+            model = os.environ.get(key, None)
+
         self.model = model
         self.agent_role = agent_role if agent_role else "unknown"
         self.semaphore = Semaphore(max_concurrent)
         self.active_tasks: set[asyncio.Task] = set()
         # It is must to register after instantiation for graceful shutdown
         shutdown_manager.register(self)
+
+    @abstractmethod
+    def get_ai_message_from_response(self, response):
+        raise NotImplementedError
 
     @abstractmethod
     async def shutdown(self) -> None:
@@ -278,7 +289,13 @@ class BaseLLM(ABC):
                 model=model,
                 agent_role=agent_role,
             ).inc(usage["completion_tokens"])
-            log_line += f", input_tokens={usage["prompt_tokens"]}, output_tokens={usage["completion_tokens"]}"
+
+            LLM_THINKING_TOKENS.labels(
+                provider=self.provider,
+                model=model,
+                agent_role=agent_role,
+            ).inc(usage["thinking_tokens"])
+            log_line += f", input_tokens={usage["prompt_tokens"]}, total_tokens={usage["total_tokens"]}"
 
         elif response:
             # Log only once per provider/model to avoid log flooding
