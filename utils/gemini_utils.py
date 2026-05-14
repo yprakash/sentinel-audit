@@ -22,6 +22,10 @@ def get_gemini_client() -> genai.Client:
         # The new SDK is more centralized. We create one client for all calls.
         # You can also pass vertexai=True here if using Google Cloud Vertex AI.
 
+        if "GOOGLE_API_KEY" not in os.environ and "GEMINI_API_KEY" not in os.environ:
+            import getpass
+            os.environ["GOOGLE_API_KEY"] = getpass.getpass("Enter GOOGLE_API_KEY: ")
+
         _gemini_client = genai.Client(
             api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"),
             http_options=types.HttpOptions(
@@ -38,6 +42,11 @@ class GeminiClient(BaseLLM):
         super().__init__("gemini", model, agent_role)
         self._client = get_gemini_client()
         logger.info("Initialized GeminiClient for agent %s with model: %s", self.agent_role, self.model)
+
+    def get_ai_message_from_response(self, response):
+        if not response or "output" not in response:
+            return None
+        return response["output"]
 
     async def shutdown(self) -> None:
         """
@@ -78,10 +87,10 @@ class GeminiClient(BaseLLM):
                 contents.append(types.Content(role=role, parts=[types.Part.from_text(text=m["content"])]))
 
             config = types.GenerateContentConfig(
-                temperature=kwargs.get("temperature", 0.7),
-                max_output_tokens=kwargs.get("max_tokens", 1024),
+                temperature=kwargs.get("temperature", 0.5),
+                max_output_tokens=kwargs.get("max_output_tokens", 1024),
                 top_p=kwargs.get("top_p"),
-                candidate_count=1,
+                candidate_count=1,  # multiple candidates increase cost/tokens
             )
 
             response = await self._client.aio.models.generate_content(
@@ -95,17 +104,20 @@ class GeminiClient(BaseLLM):
             # Convert Pydantic response to Dict for BaseLLM.extract_usage
             # This ensures compatibility with your existing logging/metrics logic
             standardized_res = {
-                "text": response.text,
+                "provider": self.provider,
+                "model": model,
+                "config": kwargs,
                 "usage": {
                     "prompt_tokens": response.usage_metadata.prompt_token_count,
                     "completion_tokens": response.usage_metadata.candidates_token_count,
+                    "thinking_tokens": response.usage_metadata.thoughts_token_count,
                     "total_tokens": response.usage_metadata.total_token_count,
-                }
+                },
+                "output": response.text,
+                "response": response.model_dump(mode='json', exclude_unset=True),
             }
 
-            if standardized_res:
-                self.write_llm_output(standardized_res)
-
+            self.write_llm_output(standardized_res)
             return standardized_res
 
         except ClientError as e:
@@ -138,7 +150,7 @@ async def main() -> None:
         ],
         temperature=0.0
     )
-    print(f"Response: {response['text']}")
+    print(f"Response: {response['output']}")
     print(f"Usage: {response['usage']}")
 
 
