@@ -1,5 +1,7 @@
 import logging
+import os
 
+from sentinel_audit.llm_outputs import StrategistOutput
 from sentinel_audit.prompts import STRATEGIST_AGENT_PROMPT
 from sentinel_audit.state import AuditState
 from utils.llm import BaseLLM
@@ -20,13 +22,11 @@ async def strategist_agent(state: AuditState, llm: BaseLLM):
         messages=[{"role": "system", "content": prompt}],
         top_p=0.8,
         temperature=0.1,  # Low reduces hallucinated invariants
-        max_output_tokens=4096,
+        max_output_tokens=os.getenv("STRATEGIST_MAX_TOKENS", 1024),
+        response_model=StrategistOutput,
     )
-    content = llm.get_ai_message_from_response(response)
 
     return {
-        "business_logic_summary": content.get("business_logic_summary"),
-        "invariants": content.get("invariants", []),
-        "assumptions": content.get("assumptions", []),
-        "trust_boundaries": content.get("trust_boundaries", []),
+        "strategist_output": llm.get_ai_message_from_response(response),
+        "current_agent": "adversary",
     }
