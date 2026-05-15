@@ -41,28 +41,24 @@ async def _create_graph():  # -> CompiledStateGraph[StateT, ContextT, InputT, Ou
     strategist_llm = create_llm(
         provider=settings.STRATEGIST_PROVIDER,
         model=settings.STRATEGIST_MODEL,
-        agent_role=strategist_node_name,
     )
 
     adversary_node_name = "adversary"
     adversary_llm = create_llm(
         provider=settings.ADVERSARY_PROVIDER,
         model=settings.ADVERSARY_MODEL,
-        agent_role=adversary_node_name,
     )
 
     validator_node_name = "validator"
     validator_llm = create_llm(
         provider=settings.VALIDATOR_PROVIDER,
         model=settings.VALIDATOR_MODEL,
-        agent_role=validator_node_name,
     )
 
     reporter_node_name = "reporter"
     reporter_llm = create_llm(
         provider=settings.REPORTER_PROVIDER,
         model=settings.REPORTER_MODEL,
-        agent_role=reporter_node_name,
     )
 
     # 2. Build Graph
@@ -83,7 +79,7 @@ async def _create_graph():  # -> CompiledStateGraph[StateT, ContextT, InputT, Ou
     checkpointer = CompositeCheckpointSaver(ckpts)
     graph = builder.compile(
         checkpointer=checkpointer,
-        interrupt_before=[strategist_node_name, adversary_node_name, validator_node_name, reporter_node_name],
+        interrupt_before=[adversary_node_name, validator_node_name, reporter_node_name],
     )
     logger.info("Sentinel graph compiled successfully with %d nodes and %d edges.",
                 len(builder.nodes), len(builder.edges)
