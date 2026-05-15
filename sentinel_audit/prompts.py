@@ -16,7 +16,6 @@ Analyze the provided Solidity smart contracts and extract:
 Requirements:
 - use deterministic reasoning
 - avoid speculation
-- infer only from provided code
 - attach supporting evidence where possible
 - prefer precision over quantity
 
