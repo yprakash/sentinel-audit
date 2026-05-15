@@ -19,10 +19,12 @@ async def adversary_agent(state: AuditState, llm: BaseLLM):
 
     logger.info("Adversary agent LLM call initiated")
     response = await llm.generate(
+        "adversary",
         messages=[{"role": "system", "content": prompt}],
         top_p=0.95,
         temperature=0.8,  # ONLY stage where creativity matters in sentinel_audit
-        max_output_tokens=os.getenv("ADVERSARY_MAX_TOKENS", 1024),
+        # Adversary agents often require the largest output budget, because of multiple attack scenarios
+        max_output_tokens=os.getenv("ADVERSARY_MAX_TOKENS", 8192),
         response_model=AdversaryOutput,
     )
 

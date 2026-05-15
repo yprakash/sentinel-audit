@@ -126,7 +126,6 @@ class BaseLLM(ABC):
             self,
             provider: str,
             model: str = None,
-            agent_role: str = None,
             max_concurrent: int = 5,
     ) -> None:
         if not provider:
@@ -137,7 +136,6 @@ class BaseLLM(ABC):
             model = os.environ.get(key, None)
 
         self.model = model
-        self.agent_role = agent_role if agent_role else "unknown"
         self.semaphore = Semaphore(max_concurrent)
         self.active_tasks: set[asyncio.Task] = set()
         # It is must to register after instantiation for graceful shutdown
@@ -152,7 +150,7 @@ class BaseLLM(ABC):
         pass
 
     @abstractmethod
-    async def _generate_impl(self, model: str, **kwargs) -> Any:
+    async def _generate_impl(self, agent_role: str, model: str, **kwargs) -> Any:
         """
         Provider-specific async implementation.
 
@@ -169,18 +167,18 @@ class BaseLLM(ABC):
         except Exception as e:
             print("Connection failed:", type(e).__name__, str(e))
 
-    def write_llm_output(self, output: dict) -> None:
+    def write_llm_output(self, agent_role: str, output: dict) -> None:
         def _save_json(file_path: str, data: Any) -> None:
             with open(file_path, "w") as f:
                 json.dump(jsonable(data), f, indent=2, ensure_ascii=False)
             logger.info("Written %s LLM output to %s", self.provider, file_path)
 
-        file_path = f"mocked_outputs/{self.agent_role}.json"
+        file_path = f"mocked_outputs/{agent_role}.json"
         _save_json(file_path, output)
-        file_path = f"mocked_outputs/{self.agent_role}_{int(time.time())}.json"
+        file_path = f"mocked_outputs/{agent_role}_{int(time.time())}.json"
         _save_json(file_path, output)
 
-    async def generate(self, model: str = None, **kwargs) -> Any:
+    async def generate(self, agent_role: str, model: str = None, **kwargs) -> Any:
         """
         Public async entrypoint.
 
@@ -201,7 +199,7 @@ class BaseLLM(ABC):
 
         try:
             async with self.semaphore:
-                response = await self._generate_impl(model=model, **kwargs)
+                response = await self._generate_impl(agent_role, model=model, **kwargs)
                 return response
         except Exception as e:
             status = "ERROR"
@@ -215,7 +213,7 @@ class BaseLLM(ABC):
                 duration = time.perf_counter() - start
                 self._record_metrics(
                     model=model,
-                    agent_role=self.agent_role,
+                    agent_role=agent_role,
                     duration=duration,
                     status=status,
                     response=response,

@@ -19,6 +19,7 @@ async def strategist_agent(state: AuditState, llm: BaseLLM):
 
     logger.info("Strategist agent LLM call initiated")
     response = await llm.generate(
+        "strategist",
         messages=[{"role": "system", "content": prompt}],
         top_p=0.8,
         temperature=0.1,  # Low reduces hallucinated invariants

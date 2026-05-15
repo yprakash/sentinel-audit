@@ -44,10 +44,10 @@ def get_gemini_client() -> genai.Client:
 
 
 class GeminiClient(BaseLLM):
-    def __init__(self, model: str = None, agent_role: str = None) -> None:
-        super().__init__("gemini", model, agent_role)
+    def __init__(self, model: str = None) -> None:
+        super().__init__("gemini", model)
         self._client = get_gemini_client()
-        logger.info("Initialized GeminiClient for agent %s with model: %s", self.agent_role, self.model)
+        logger.info("Initialized GeminiClient with model: %s", self.model)
 
     def get_ai_message_from_response(self, response):
         if not response or "output" not in response:
@@ -82,7 +82,7 @@ class GeminiClient(BaseLLM):
         except Exception:
             print(f"Model {model}: 0 (Hard Quota/Blocked)")
 
-    async def _generate_impl(self, model: str, **kwargs) -> Any:
+    async def _generate_impl(self, agent_role: str, model: str, **kwargs) -> Any:
         try:
             if "retries" not in kwargs:
                 kwargs["retries"] = 3
@@ -104,7 +104,7 @@ class GeminiClient(BaseLLM):
                 gemini_config_dict["response_schema"] = kwargs["response_model"]
                 gemini_config_dict["response_mime_type"] = "application/json"
             else:
-                logger.info("response_model is NOT present in %s kwargs for %s agent", self.provider, self.agent_role)
+                logger.info("response_model is NOT present in %s kwargs for %s agent", self.provider, agent_role)
 
             config = types.GenerateContentConfig(**gemini_config_dict)
 
@@ -132,6 +132,7 @@ class GeminiClient(BaseLLM):
             standardized_res = {
                 "provider": self.provider,
                 "model": model,
+                "agent_role": agent_role,
                 "config": gemini_config_dict,
                 "usage": {
                     "prompt_tokens": response.usage_metadata.prompt_token_count,
@@ -143,7 +144,7 @@ class GeminiClient(BaseLLM):
                 "response": response.model_dump(mode='json', exclude_unset=True),
             }
 
-            self.write_llm_output(standardized_res)
+            self.write_llm_output(agent_role, standardized_res)
             return standardized_res
 
         # except ValidationError as e:
@@ -178,13 +179,14 @@ class GeminiClient(BaseLLM):
 
                     await asyncio.sleep(_retry_after_seconds)
                     logger.warning("Retrying %s after %d seconds for %s agent with model %s",
-                                   self.provider, _retry_after_seconds, self.agent_role, model)
-                    return await self._generate_impl(model, **kwargs)
+                                   self.provider, _retry_after_seconds, agent_role, model)
+                    return await self._generate_impl(agent_role, model, **kwargs)
 
             raise e
         except Exception as e:
             error_type = type(e).__name__
             logger.exception("Gemini API Error [%s]: ", error_type)
+            raise
             # raise RuntimeError(f"Gemini call failed: {error_type}") from e
 
 
@@ -193,9 +195,11 @@ LLMRegistry.register("gemini", GeminiClient)
 
 async def main() -> None:
     model_name = "gemini-2.5-flash"
-    llm = GeminiClient(model=model_name, agent_role="healthcheck")
+    agent_role = "healthcheck"
+    llm = GeminiClient(model=model_name)
 
     response = await llm.generate(
+        agent_role,
         messages=[
             {"role": "user", "content": "Confirm system operational. Answer with 'OK'."}
         ],

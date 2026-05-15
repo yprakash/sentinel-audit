@@ -20,6 +20,7 @@ async def reporter_agent(state: AuditState, llm: BaseLLM):
 
     # Reporter is a polished professional writer
     response = await llm.generate(
+        "reporter",
         messages=[{"role": "system", "content": prompt}],
         top_p=0.9,
         temperature=0.4,
