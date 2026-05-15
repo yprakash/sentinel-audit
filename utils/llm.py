@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 from prometheus_client import Histogram, Counter
 
+from utils.json_utils import jsonable
 from utils.metrics import start_metrics_server
 from utils.shutdown_manager import shutdown_manager
 
@@ -171,7 +172,7 @@ class BaseLLM(ABC):
     def write_llm_output(self, output: dict) -> None:
         def _save_json(file_path: str, data: Any) -> None:
             with open(file_path, "w") as f:
-                json.dump(data, f, indent=2)
+                json.dump(jsonable(data), f, indent=2, ensure_ascii=False)
             logger.info("Written %s LLM output to %s", self.provider, file_path)
 
         file_path = f"mocked_outputs/{self.agent_role}.json"
@@ -209,15 +210,18 @@ class BaseLLM(ABC):
             raise e
 
         finally:
-            self.active_tasks.discard(current_task)
-            duration = time.perf_counter() - start
-            self._record_metrics(
-                model=model,
-                agent_role=self.agent_role,
-                duration=duration,
-                status=status,
-                response=response,
-            )
+            try:
+                self.active_tasks.discard(current_task)
+                duration = time.perf_counter() - start
+                self._record_metrics(
+                    model=model,
+                    agent_role=self.agent_role,
+                    duration=duration,
+                    status=status,
+                    response=response,
+                )
+            except Exception as e:
+                logger.exception("Failed to record metrics")
 
     def extract_usage(self, response: Any) -> Dict[str, int]:
         usage = response.get("usage", None) if response else None
@@ -239,12 +243,14 @@ class BaseLLM(ABC):
         if not total_tokens:
             total_tokens = prompt_tokens + completion_tokens + thinking_tokens
 
-        return {
+        usage = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
-            "thinking_tokens": thinking_tokens,
             "total_tokens": total_tokens,
         }
+        if thinking_tokens:
+            usage["thinking_tokens"] = thinking_tokens
+        return usage
 
     def _record_metrics(
             self,
@@ -293,11 +299,12 @@ class BaseLLM(ABC):
                 agent_role=agent_role,
             ).inc(usage["completion_tokens"])
 
-            LLM_THINKING_TOKENS.labels(
-                provider=self.provider,
-                model=model,
-                agent_role=agent_role,
-            ).inc(usage["thinking_tokens"])
+            if "thinking_tokens" in usage:
+                LLM_THINKING_TOKENS.labels(
+                    provider=self.provider,
+                    model=model,
+                    agent_role=agent_role,
+                ).inc(usage["thinking_tokens"])
             log_line += f", input_tokens={usage["prompt_tokens"]}, total_tokens={usage["total_tokens"]}"
 
         elif response:
