@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from typing import List, Any, Callable, Awaitable, Dict
+from urllib.parse import urlparse
 
 import psycopg
 import redis.asyncio as redis
@@ -52,7 +53,11 @@ async def get_postgres_checkpointer():
     cp = AsyncPostgresSaver(conn)
     await cp.setup()  # create tables
 
-    logger.info("AsyncPostgresSaver created in %.3f seconds from %s", time.perf_counter() - start, pg_url)
+    parsed = urlparse(pg_url)
+    # Reconstruct without password
+    safe_uri = f"{parsed.scheme}://{parsed.username}:****@{parsed.hostname}:{parsed.port}{parsed.path}"
+
+    logger.info("AsyncPostgresSaver created in %.3f seconds from %s", time.perf_counter() - start, safe_uri)
     return cp
 
 

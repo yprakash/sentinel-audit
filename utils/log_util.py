@@ -54,7 +54,7 @@ def setup_logging(
         root_logger.addHandler(stdout_handler)
 
     logger.info(
-        "Logging initialized from %s at level: %s", path,
+        "Logging initialized from %s at level: %s", os.path.relpath(path, start=root_dir),
         logging.getLevelName(root_logger.getEffectiveLevel())
     )
 
