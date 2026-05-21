@@ -6,6 +6,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 from google.genai.errors import ClientError, ServerError
+from pydantic_core import ValidationError
 
 from llm_registry import LLMRegistry
 from utils.llm import shutdown_llm_client, BaseLLM
@@ -117,9 +118,20 @@ class GeminiClient(BaseLLM):
                 raise Exception(f"Empty response from generate_content() with model: {model}")
 
             if response_model:
-                parsed_output = response_model.model_validate_json(
-                    response.text.strip()
-                )
+                try:
+                    # parsed_output = response.parsed
+                    parsed_output = response_model.model_validate_json(response.text.strip())
+                except ValidationError as e:
+                    logger.exception(
+                        "Structured output validation failed. provider=%s model=%s schema=%s errors=%s",
+                        self.provider,
+                        model,
+                        response_model.__name__,
+                        e.errors(),
+                    )
+                    logger.error("Raw LLM output:\n%s", response.text)
+                    raise
+
                 assert isinstance(parsed_output, response_model)
             else:
                 parsed_output = response.text
@@ -174,7 +186,7 @@ class GeminiClient(BaseLLM):
             if e.code == 503:
                 kwargs["retries"] -= 1
                 if kwargs["retries"] > 0:
-                    logger.error("Error: %s", e)
+                    logger.error("Error with model %s: %s", model, e)
                     model = os.getenv('GEMINI_FALLBACK_MODEL', 'gemini-3.1-flash-lite')
 
                     await asyncio.sleep(_retry_after_seconds)
